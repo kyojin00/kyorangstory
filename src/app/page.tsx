@@ -2,254 +2,271 @@
 
 // src/app/page.tsx
 
-import { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
 
-export default function LoginPage() {
-  const [tab,      setTab]      = useState<'login' | 'signup'>('login');
+type Mode = 'login' | 'signup';
+
+export default function HomePage() {
+  const [mode,     setMode]     = useState<Mode>('login');
   const [email,    setEmail]    = useState('');
   const [password, setPassword] = useState('');
-  const [name,     setName]     = useState('');
-  const [loading,  setLoading]  = useState(false);
-  const [oauthLoading, setOauthLoading] = useState<'google' | 'kakao' | null>(null);
+  const [loading,  setLoading]  = useState<'email' | 'google' | 'kakao' | null>(null);
+  const [message,  setMessage]  = useState('');
   const [error,    setError]    = useState('');
-  const [success,  setSuccess]  = useState('');
-  const router   = useRouter();
+
   const supabase = createClient();
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (data.user) router.replace('/story');
-    });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // ── 이메일 로그인 / 회원가입 ──
+  const handleEmail = async () => {
+    if (!email || !password || loading) return;
+    setLoading('email');
+    setError('');
+    setMessage('');
 
-  const handleEmailAuth = async () => {
-    if (!email.trim() || !password.trim()) { setError('이메일과 비밀번호를 입력해주세요'); return; }
-    if (tab === 'signup' && !name.trim()) { setError('이름을 입력해주세요'); return; }
-    setLoading(true); setError(''); setSuccess('');
-
-    if (tab === 'login') {
-      const { error: err } = await supabase.auth.signInWithPassword({ email, password });
-      if (err) { setError('이메일 또는 비밀번호가 올바르지 않아요'); setLoading(false); return; }
-      router.replace('/story');
+    if (mode === 'signup') {
+      const { error: err } = await supabase.auth.signUp({
+        email,
+        password,
+        options: { emailRedirectTo: `${location.origin}/auth/callback` },
+      });
+      if (err) {
+        setError(err.message);
+      } else {
+        setMessage('📧 인증 메일을 보냈어요! 메일함을 확인해주세요.');
+      }
     } else {
-      const { error: err } = await supabase.auth.signUp({ email, password, options: { data: { full_name: name } } });
-      if (err) { setError(err.message); setLoading(false); return; }
-      setSuccess('가입 완료! 이메일을 확인해주세요 📬');
-      setLoading(false);
+      const { error: err } = await supabase.auth.signInWithPassword({ email, password });
+      if (err) {
+        setError('이메일 또는 비밀번호가 올바르지 않아요.');
+      } else {
+        location.href = '/story';
+      }
     }
+    setLoading(null);
   };
 
+  // ── OAuth ──
   const handleOAuth = async (provider: 'google' | 'kakao') => {
-    setOauthLoading(provider); setError('');
-    const { error: err } = await supabase.auth.signInWithOAuth({
+    setLoading(provider);
+    await supabase.auth.signInWithOAuth({
       provider,
-      options: {
-        redirectTo: `${location.origin}/auth/callback`,
-        scopes: provider === 'kakao' ? 'profile_nickname profile_image' : undefined,
-      },
+      options: { redirectTo: `${location.origin}/auth/callback` },
     });
-    if (err) { setError('로그인 중 오류가 발생했어요'); setOauthLoading(null); }
   };
+
+  const isEmailLoading = loading === 'email';
 
   return (
     <div style={{
       minHeight: '100vh',
-      background: 'linear-gradient(145deg, #FFFDF9 0%, #FFF4E8 50%, #FFF0E0 100%)',
-      display: 'flex', fontFamily: "'Noto Sans KR', sans-serif",
+      background: '#080810',
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      fontFamily: 'sans-serif',
+      padding: '0 24px',
     }}>
-      {/* 왼쪽 일러스트 패널 */}
-      <div style={{
-        flex: 1, display: 'flex', flexDirection: 'column',
-        alignItems: 'center', justifyContent: 'center',
-        padding: '60px', position: 'relative', overflow: 'hidden',
-      }}>
-        {/* 배경 장식 */}
-        <div style={{ position: 'absolute', top: '10%', left: '10%', width: '200px', height: '200px', borderRadius: '50%', background: 'rgba(232, 149, 109, 0.08)', pointerEvents: 'none' }} />
-        <div style={{ position: 'absolute', bottom: '15%', right: '5%', width: '300px', height: '300px', borderRadius: '50%', background: 'rgba(124, 58, 237, 0.05)', pointerEvents: 'none' }} />
 
-        {/* 로고 + 타이틀 */}
-        <div style={{ textAlign: 'center', animation: 'fadeIn 0.8s ease', position: 'relative', zIndex: 1 }}>
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="kyorang" style={{ width: 100, height: 100, objectFit: 'contain', marginBottom: '20px', filter: 'drop-shadow(0 8px 24px rgba(232,149,109,0.2))' }} />
-          <h1 style={{ fontSize: '2.4rem', fontWeight: 900, color: '#1C1917', margin: '0 0 12px', letterSpacing: '-0.5px', lineHeight: 1.2 }}>
-            교랑 스토리
-          </h1>
-          <p style={{ fontSize: '1rem', color: '#78716C', lineHeight: 1.7, maxWidth: '360px' }}>
-            판단 없이 마음을 털어놓는 공간.<br />
-            익명으로 감정을 나누고, 따뜻한 공감을 받아보세요.
-          </p>
-
-          {/* 특징 카드들 */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px', marginTop: '36px', maxWidth: '320px', textAlign: 'left' }}>
-            {[
-              { icon: '🌙', title: '익명 피드', desc: '신원 노출 없이 솔직하게' },
-              { icon: '💭', title: '1:1 상담', desc: '언제든 이야기 들어드려요' },
-              { icon: '🔍', title: '대화 분석', desc: '카톡 대화 감정 분석' },
-            ].map(f => (
-              <div key={f.title} style={{ display: 'flex', alignItems: 'center', gap: '14px', padding: '12px 16px', background: 'rgba(255,255,255,0.7)', borderRadius: '12px', border: '1px solid rgba(232,149,109,0.15)', backdropFilter: 'blur(8px)' }}>
-                <span style={{ fontSize: '1.4rem', flexShrink: 0 }}>{f.icon}</span>
-                <div>
-                  <p style={{ margin: 0, fontWeight: 700, fontSize: '0.875rem', color: '#1C1917' }}>{f.title}</p>
-                  <p style={{ margin: 0, fontSize: '0.78rem', color: '#78716C' }}>{f.desc}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
+      {/* 로고 */}
+      <div style={{ textAlign: 'center', marginBottom: '40px' }}>
+        <img src="/logo.png" alt="kyorang" style={{ width: 80, height: 80, objectFit: 'contain', marginBottom: '12px' }} />
+        <h1 style={{ margin: 0, fontSize: '1.6rem', fontWeight: 800, color: '#a78bfa' }}>
+          교랑 스토리
+        </h1>
+        <p style={{ margin: '10px 0 0', fontSize: '0.875rem', color: '#64748b', lineHeight: 1.6 }}>
+          익명으로 마음을 털어놓는 공간<br />
+          아무도 당신을 판단하지 않아요
+        </p>
       </div>
 
-      {/* 오른쪽 로그인 패널 */}
-      <div style={{
-        width: '460px', flexShrink: 0,
-        background: '#FFFFFF',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-        padding: '48px 40px',
-        boxShadow: '-20px 0 60px rgba(0,0,0,0.06)',
-      }}>
-        <div style={{ width: '100%', maxWidth: '360px', animation: 'slideIn 0.6s ease' }}>
+      <div style={{ width: '100%', maxWidth: '340px' }}>
 
-          <h2 style={{ fontSize: '1.6rem', fontWeight: 800, color: '#1C1917', margin: '0 0 6px', letterSpacing: '-0.3px' }}>
-            {tab === 'login' ? '다시 만나서 반가워요 👋' : '함께해요 💜'}
-          </h2>
-          <p style={{ fontSize: '0.875rem', color: '#78716C', margin: '0 0 28px' }}>
-            {tab === 'login' ? '로그인하고 이야기를 나눠보세요' : '지금 가입하면 모든 기능을 이용할 수 있어요'}
+        {/* 탭 */}
+        <div style={{
+          display: 'flex',
+          background: '#0f0f1f',
+          border: '1px solid #1e1b3a',
+          borderRadius: '12px',
+          padding: '4px',
+          marginBottom: '24px',
+        }}>
+          {(['login', 'signup'] as Mode[]).map(m => (
+            <button
+              key={m}
+              onClick={() => { setMode(m); setError(''); setMessage(''); }}
+              style={{
+                flex: 1,
+                padding: '9px',
+                borderRadius: '9px',
+                border: 'none',
+                background: mode === m ? '#7c3aed' : 'transparent',
+                color: mode === m ? '#fff' : '#64748b',
+                fontSize: '0.875rem',
+                fontWeight: 700,
+                cursor: 'pointer',
+                transition: 'all 0.2s',
+              }}
+            >
+              {m === 'login' ? '로그인' : '회원가입'}
+            </button>
+          ))}
+        </div>
+
+        {/* 이메일 입력 */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '12px' }}>
+          <input
+            type="email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            placeholder="이메일"
+            style={inputStyle}
+            onFocus={e  => { e.target.style.borderColor = '#7c3aed'; }}
+            onBlur={e   => { e.target.style.borderColor = '#1e1b3a'; }}
+            onKeyDown={e => { if (e.key === 'Enter') handleEmail(); }}
+          />
+          <input
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder="비밀번호 (6자리 이상)"
+            style={inputStyle}
+            onFocus={e  => { e.target.style.borderColor = '#7c3aed'; }}
+            onBlur={e   => { e.target.style.borderColor = '#1e1b3a'; }}
+            onKeyDown={e => { if (e.key === 'Enter') handleEmail(); }}
+          />
+        </div>
+
+        {/* 에러 / 성공 메시지 */}
+        {error && (
+          <p style={{ fontSize: '0.8rem', color: '#ef4444', margin: '0 0 12px', textAlign: 'center' }}>
+            {error}
           </p>
+        )}
+        {message && (
+          <p style={{ fontSize: '0.8rem', color: '#22c55e', margin: '0 0 12px', textAlign: 'center', lineHeight: 1.5 }}>
+            {message}
+          </p>
+        )}
 
-          {/* 소셜 로그인 */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '22px' }}>
-            <button onClick={() => handleOAuth('google')} disabled={!!oauthLoading} style={{
-              width: '100%', padding: '13px', borderRadius: '12px',
-              border: '1.5px solid #E8E4E0', background: '#fff',
-              color: '#1C1917', fontSize: '0.9rem', fontWeight: 600,
-              cursor: oauthLoading ? 'not-allowed' : 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
-              transition: 'all 0.15s', opacity: oauthLoading && oauthLoading !== 'google' ? 0.5 : 1,
-              boxShadow: 'var(--shadow-sm)',
-            }}
-              onMouseEnter={e => { if (!oauthLoading) (e.currentTarget as HTMLElement).style.borderColor = '#E8956D'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#E8E4E0'; }}
-            >
-              {oauthLoading === 'google' ? '연결 중...' : (
-                <>
-                  <svg width="18" height="18" viewBox="0 0 24 24">
-                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
-                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
-                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
-                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
-                  </svg>
-                  Google로 계속하기
-                </>
-              )}
-            </button>
-
-            <button onClick={() => handleOAuth('kakao')} disabled={!!oauthLoading} style={{
-              width: '100%', padding: '13px', borderRadius: '12px',
-              border: 'none', background: '#FEE500',
-              color: '#191919', fontSize: '0.9rem', fontWeight: 700,
-              cursor: oauthLoading ? 'not-allowed' : 'pointer',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px',
-              transition: 'all 0.15s', opacity: oauthLoading && oauthLoading !== 'kakao' ? 0.5 : 1,
-              boxShadow: 'var(--shadow-sm)',
-            }}
-              onMouseEnter={e => { if (!oauthLoading) (e.currentTarget as HTMLElement).style.background = '#F7DC00'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = '#FEE500'; }}
-            >
-              {oauthLoading === 'kakao' ? '연결 중...' : (
-                <>
-                  <svg width="18" height="18" viewBox="0 0 24 24" fill="#191919">
-                    <path d="M12 3C6.477 3 2 6.477 2 10.5c0 2.548 1.523 4.78 3.8 6.15L4.9 20.1c-.1.3.2.6.5.5l4.2-2.8c.8.1 1.6.2 2.4.2 5.523 0 10-3.477 10-7.5S17.523 3 12 3z"/>
-                  </svg>
-                  카카오로 계속하기
-                </>
-              )}
-            </button>
-          </div>
-
-          {/* 구분선 */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
-            <div style={{ flex: 1, height: '1px', background: '#EDE8E0' }} />
-            <span style={{ fontSize: '0.75rem', color: '#A8A29E' }}>또는 이메일로</span>
-            <div style={{ flex: 1, height: '1px', background: '#EDE8E0' }} />
-          </div>
-
-          {/* 탭 */}
-          <div style={{ display: 'flex', background: '#FFF8F0', borderRadius: '12px', padding: '4px', marginBottom: '16px', border: '1px solid #EDE8E0' }}>
-            {(['login', 'signup'] as const).map(t => (
-              <button key={t} onClick={() => { setTab(t); setError(''); setSuccess(''); }} style={{
-                flex: 1, padding: '9px', borderRadius: '9px', border: 'none',
-                background: tab === t ? '#fff' : 'transparent',
-                color: tab === t ? '#1C1917' : '#78716C',
-                fontSize: '0.875rem', fontWeight: tab === t ? 700 : 500,
-                cursor: 'pointer', transition: 'all 0.15s',
-                boxShadow: tab === t ? 'var(--shadow-sm)' : 'none',
-              }}>
-                {t === 'login' ? '로그인' : '회원가입'}
-              </button>
-            ))}
-          </div>
-
-          {/* 입력 폼 */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {tab === 'signup' && (
-              <input value={name} onChange={e => setName(e.target.value)} placeholder="이름"
-                style={inputStyle}
-                onFocus={e  => { e.target.style.borderColor = '#E8956D'; e.target.style.boxShadow = '0 0 0 3px rgba(232,149,109,0.12)'; }}
-                onBlur={e   => { e.target.style.borderColor = '#EDE8E0'; e.target.style.boxShadow = 'none'; }}
-              />
-            )}
-            <input value={email} onChange={e => setEmail(e.target.value)} placeholder="이메일" type="email"
-              onKeyDown={e => { if (e.key === 'Enter') handleEmailAuth(); }}
-              style={inputStyle}
-              onFocus={e  => { e.target.style.borderColor = '#E8956D'; e.target.style.boxShadow = '0 0 0 3px rgba(232,149,109,0.12)'; }}
-              onBlur={e   => { e.target.style.borderColor = '#EDE8E0'; e.target.style.boxShadow = 'none'; }}
-            />
-            <input value={password} onChange={e => setPassword(e.target.value)} placeholder="비밀번호" type="password"
-              onKeyDown={e => { if (e.key === 'Enter') handleEmailAuth(); }}
-              style={inputStyle}
-              onFocus={e  => { e.target.style.borderColor = '#E8956D'; e.target.style.boxShadow = '0 0 0 3px rgba(232,149,109,0.12)'; }}
-              onBlur={e   => { e.target.style.borderColor = '#EDE8E0'; e.target.style.boxShadow = 'none'; }}
-            />
-          </div>
-
-          {error   && <p style={{ margin: '10px 0 0', fontSize: '0.82rem', color: '#DC2626', textAlign: 'center', padding: '8px 12px', background: '#FEF2F2', borderRadius: '8px', border: '1px solid #FECACA' }}>{error}</p>}
-          {success && <p style={{ margin: '10px 0 0', fontSize: '0.82rem', color: '#16A34A', textAlign: 'center', padding: '8px 12px', background: '#F0FDF4', borderRadius: '8px', border: '1px solid #BBF7D0' }}>{success}</p>}
-
-          <button onClick={handleEmailAuth} disabled={loading} style={{
-            width: '100%', marginTop: '14px', padding: '14px', borderRadius: '12px', border: 'none',
-            background: loading ? '#EDE8E0' : 'linear-gradient(135deg, #E8956D, #D4724A)',
-            color: loading ? '#A8A29E' : '#fff',
-            fontSize: '0.9rem', fontWeight: 700,
-            cursor: loading ? 'not-allowed' : 'pointer',
+        {/* 이메일 버튼 */}
+        <button
+          onClick={handleEmail}
+          disabled={!email || !password || loading !== null}
+          style={{
+            width: '100%',
+            padding: '13px',
+            borderRadius: '12px',
+            border: 'none',
+            background: email && password && !loading ? '#7c3aed' : '#1e1b3a',
+            color: email && password && !loading ? '#fff' : '#475569',
+            fontSize: '0.9rem',
+            fontWeight: 700,
+            cursor: email && password && !loading ? 'pointer' : 'not-allowed',
+            marginBottom: '20px',
             transition: 'all 0.2s',
-            boxShadow: loading ? 'none' : '0 4px 14px rgba(232, 149, 109, 0.4)',
           }}
-            onMouseEnter={e => { if (!loading) (e.currentTarget as HTMLElement).style.transform = 'translateY(-1px)'; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = 'translateY(0)'; }}
+        >
+          {isEmailLoading
+            ? '처리 중...'
+            : mode === 'login' ? '이메일로 로그인' : '이메일로 회원가입'}
+        </button>
+
+        {/* 구분선 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '16px' }}>
+          <div style={{ flex: 1, height: '1px', background: '#1e1b3a' }} />
+          <span style={{ fontSize: '0.75rem', color: '#334155' }}>또는</span>
+          <div style={{ flex: 1, height: '1px', background: '#1e1b3a' }} />
+        </div>
+
+        {/* OAuth 버튼 */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+
+          {/* Google */}
+          <button
+            onClick={() => handleOAuth('google')}
+            disabled={loading !== null}
+            style={{
+              width: '100%',
+              padding: '13px',
+              borderRadius: '12px',
+              border: '1px solid #1e1b3a',
+              background: '#0f0f1f',
+              color: '#e2e8f0',
+              fontSize: '0.9rem',
+              fontWeight: 600,
+              cursor: loading !== null ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '10px',
+              transition: 'all 0.2s',
+            }}
           >
-            {loading ? '처리 중...' : tab === 'login' ? '로그인' : '가입하기'}
+            <svg width="17" height="17" viewBox="0 0 48 48">
+              <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+              <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+              <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+              <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+            </svg>
+            {loading === 'google' ? '연결 중...' : 'Google로 계속하기'}
           </button>
 
-          <p style={{ textAlign: 'center', fontSize: '0.72rem', color: '#A8A29E', marginTop: '20px', lineHeight: 1.7 }}>
-            계속하면 <span style={{ color: '#E8956D', cursor: 'pointer' }}>이용약관</span>과{' '}
-            <span style={{ color: '#E8956D', cursor: 'pointer' }}>개인정보처리방침</span>에 동의하게 됩니다.
-          </p>
+          {/* Kakao */}
+          <button
+            onClick={() => handleOAuth('kakao')}
+            disabled={loading !== null}
+            style={{
+              width: '100%',
+              padding: '13px',
+              borderRadius: '12px',
+              border: 'none',
+              background: loading === 'kakao' ? '#c9a800' : '#FEE500',
+              color: '#191919',
+              fontSize: '0.9rem',
+              fontWeight: 700,
+              cursor: loading !== null ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '10px',
+              transition: 'all 0.2s',
+            }}
+          >
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="#191919">
+              <path d="M12 3C6.48 3 2 6.48 2 10.8c0 2.7 1.56 5.07 3.9 6.48l-.99 3.67 4.28-2.82c.88.18 1.82.27 2.81.27 5.52 0 10-3.48 10-7.8S17.52 3 12 3z"/>
+            </svg>
+            {loading === 'kakao' ? '연결 중...' : '카카오로 계속하기'}
+          </button>
         </div>
-      </div>
 
-      <style>{`
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
-        @keyframes slideIn { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: translateX(0); } }
-      `}</style>
+        {/* 하단 안내 */}
+        <p style={{
+          marginTop: '28px',
+          fontSize: '0.72rem',
+          color: '#334155',
+          textAlign: 'center',
+          lineHeight: 1.6,
+        }}>
+          로그인 후에도 게시글은 익명으로 표시됩니다.<br />
+          신원은 절대 노출되지 않아요 🔒
+        </p>
+      </div>
     </div>
   );
 }
 
 const inputStyle: React.CSSProperties = {
-  width: '100%', background: '#FAFAF8', border: '1.5px solid #EDE8E0',
-  borderRadius: '12px', padding: '12px 16px', color: '#1C1917',
-  fontSize: '0.9rem', outline: 'none', boxSizing: 'border-box',
-  fontFamily: "'Noto Sans KR', sans-serif", transition: 'all 0.15s',
+  width: '100%',
+  background: '#0f0f1f',
+  border: '1px solid #1e1b3a',
+  borderRadius: '12px',
+  padding: '12px 14px',
+  color: '#e2e8f0',
+  fontSize: '0.9rem',
+  outline: 'none',
+  boxSizing: 'border-box',
+  fontFamily: 'sans-serif',
+  transition: 'border-color 0.2s',
 };

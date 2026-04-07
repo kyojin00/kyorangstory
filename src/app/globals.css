@@ -1,99 +1,26 @@
-/* src/app/globals.css */
-
-@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+@import "tailwindcss";
 
 :root {
-  /* 따뜻한 밝은 테마 */
-  --bg:          #FFFDF9;
-  --bg-subtle:   #FFF8F0;
-  --bg-card:     #FFFFFF;
-  --bg-hover:    #FFF4E8;
-
-  --border:      #EDE8E0;
-  --border-focus: #E8956D;
-
-  --text-primary:   #1C1917;
-  --text-secondary: #78716C;
-  --text-muted:     #A8A29E;
-
-  --accent:         #E8956D;   /* 따뜻한 코랄 오렌지 */
-  --accent-dark:    #D4724A;
-  --accent-light:   #FDE8DC;
-  --accent-2:       #7C3AED;   /* 보조 퍼플 */
-  --accent-2-light: #F3EEFF;
-
-  --success: #16A34A;
-  --danger:  #DC2626;
-  --warning: #D97706;
-
-  --shadow-sm: 0 1px 3px rgba(0,0,0,0.06), 0 1px 2px rgba(0,0,0,0.04);
-  --shadow-md: 0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
-  --shadow-lg: 0 12px 32px rgba(0,0,0,0.10), 0 4px 8px rgba(0,0,0,0.06);
-
-  --radius-sm:  8px;
-  --radius-md:  12px;
-  --radius-lg:  16px;
-  --radius-xl:  24px;
-  --radius-full: 9999px;
+  --background: #ffffff;
+  --foreground: #171717;
 }
 
-* {
-  box-sizing: border-box;
-  margin: 0;
-  padding: 0;
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
 }
 
-html {
-  scroll-behavior: smooth;
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
 }
 
 body {
-  font-family: 'Noto Sans KR', 'Plus Jakarta Sans', sans-serif;
-  background: var(--bg);
-  color: var(--text-primary);
-  line-height: 1.6;
-  -webkit-font-smoothing: antialiased;
-}
-
-/* 스크롤바 */
-::-webkit-scrollbar { width: 6px; height: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
-
-/* 링크 기본 */
-a { color: inherit; text-decoration: none; }
-
-/* 버튼 기본 */
-button { font-family: inherit; cursor: pointer; }
-
-/* 입력 기본 */
-input, textarea { font-family: inherit; }
-
-/* 선택 색상 */
-::selection { background: var(--accent-light); color: var(--accent-dark); }
-
-/* 유틸리티 애니메이션 */
-@keyframes fadeIn {
-  from { opacity: 0; transform: translateY(8px); }
-  to   { opacity: 1; transform: translateY(0); }
-}
-
-@keyframes slideIn {
-  from { opacity: 0; transform: translateX(-12px); }
-  to   { opacity: 1; transform: translateX(0); }
-}
-
-@keyframes bounce {
-  0%, 60%, 100% { transform: translateY(0); }
-  30% { transform: translateY(-5px); }
-}
-
-@keyframes spin {
-  to { transform: rotate(360deg); }
-}
-
-@keyframes pulse {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  background: var(--background);
+  color: var(--foreground);
+  font-family: Arial, Helvetica, sans-serif;
 }
