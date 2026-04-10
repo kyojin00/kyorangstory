@@ -31,9 +31,25 @@ export async function middleware(req: NextRequest) {
   }
 
   // 비로그인 상태에서 보호된 경로 접근 시 → 루트(/)로
-  const protectedPaths = ['/story/write', '/feed', '/profile', '/story/my'];
-  const isProtected = protectedPaths.some(p => pathname.startsWith(p));
+  const protectedPaths = [
+    '/feed',
+    '/story/write',
+    '/story/my',
+    '/profile',
+    '/messages',
+    '/notifications',
+    '/search',
+    '/diary',
+    '/ai-chat',
+    '/kakao-analysis',
+    '/trending',
+    '/settings',
+    '/penpal',
+    '/comfort',
+    '/emotion-type',
+  ];
 
+  const isProtected = protectedPaths.some(p => pathname.startsWith(p));
   if (isProtected && !user) {
     return NextResponse.redirect(new URL('/', req.url));
   }
@@ -45,9 +61,20 @@ export const config = {
   matcher: [
     '/',
     '/login',
-    '/feed',
+    '/feed/:path*',
     '/story/write',
     '/story/my',
     '/profile/:path*',
+    '/messages/:path*',
+    '/notifications',
+    '/search',
+    '/diary/:path*',
+    '/ai-chat/:path*',
+    '/kakao-analysis/:path*',
+    '/trending',
+    '/settings/:path*',
+    '/penpal',
+    '/comfort',
+    '/emotion-type',
   ],
 };

@@ -3,10 +3,11 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { getProfileCached, getProfileSync } from '@/lib/profileCache';
 
 interface MyProfile { username: string; display_name: string; avatar_url: string; }
 
-let _cachedProfile: MyProfile | null = null;
+let _cachedPartner: { username: string; id: string } | null = null;
 
 interface Props { children: React.ReactNode; rightPanel?: React.ReactNode; }
 
@@ -24,7 +25,7 @@ const NAV_STATIC = [
 ];
 
 export default function SidebarLayout({ children, rightPanel }: Props) {
-  const [myProfile,   setMyProfile]   = useState<MyProfile | null>(_cachedProfile);
+  const [myProfile,    setMyProfile]    = useState<MyProfile | null>(getProfileSync() as MyProfile | null);
   const [unreadDM,    setUnreadDM]    = useState(0);
   const [unreadNotif, setUnreadNotif] = useState(0);
   const [mounted,     setMounted]     = useState(false);
@@ -36,15 +37,41 @@ export default function SidebarLayout({ children, rightPanel }: Props) {
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     const refreshCounts = async (uid: string) => {
-      // 현재 열려 있는 DM 채팅방 파트너 확인
-      const { data: activeRoom } = await supabase
-        .from('active_dm_rooms')
-        .select('room_partner_id, updated_at')
-        .eq('user_id', uid)
-        .maybeSingle();
+      // ① sessionStorage에서 즉시 확인 (새로고침 타이밍 대응)
+      const activeUsername = typeof window !== 'undefined'
+        ? sessionStorage.getItem('active_dm_username')
+        : null;
 
-      const isRoomActive = activeRoom &&
-        Date.now() - new Date(activeRoom.updated_at).getTime() < 30_000;
+      let excludePartnerId: string | null = null;
+
+      if (activeUsername) {
+        // username → id 변환 (캐시 우선)
+        if (_cachedPartner?.username === activeUsername) {
+          excludePartnerId = _cachedPartner.id;
+        } else {
+          const { data: partnerProfile } = await supabase
+            .from('profiles').select('id').eq('username', activeUsername).maybeSingle();
+          if (partnerProfile?.id) {
+            _cachedPartner = { username: activeUsername, id: partnerProfile.id };
+            excludePartnerId = partnerProfile.id;
+          }
+        }
+      } else {
+        _cachedPartner = null;  // DM방 나가면 캐시 초기화
+        // ② fallback: active_dm_rooms DB 체크 (25초 heartbeat 기반)
+        const { data: activeRoom } = await supabase
+          .from('active_dm_rooms')
+          .select('room_partner_id, updated_at')
+          .eq('user_id', uid)
+          .maybeSingle();
+
+        const isRoomActive = activeRoom &&
+          Date.now() - new Date(activeRoom.updated_at).getTime() < 30_000;
+
+        if (isRoomActive && activeRoom?.room_partner_id) {
+          excludePartnerId = activeRoom.room_partner_id;
+        }
+      }
 
       // 채팅 중인 상대 메시지는 미읽음 카운트 제외
       let dmQuery = supabase
@@ -53,8 +80,8 @@ export default function SidebarLayout({ children, rightPanel }: Props) {
         .eq('receiver_id', uid)
         .eq('is_read', false);
 
-      if (isRoomActive && activeRoom?.room_partner_id) {
-        dmQuery = dmQuery.neq('sender_id', activeRoom.room_partner_id);
+      if (excludePartnerId) {
+        dmQuery = dmQuery.neq('sender_id', excludePartnerId);
       }
 
       const [{ count: dmCount }, { count: notifCount }] = await Promise.all([
@@ -67,13 +94,10 @@ export default function SidebarLayout({ children, rightPanel }: Props) {
     const init = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
-      if (!_cachedProfile) {
-        const res  = await fetch('/api/profile');
-        const data = await res.json();
-        if (data?.username) { _cachedProfile = data; setMyProfile(data); }
-      }
+      const profile = await getProfileCached();
+      if (profile) setMyProfile(profile as MyProfile);
       await refreshCounts(user.id);
-      interval = setInterval(() => refreshCounts(user.id), 5000);
+      interval = setInterval(() => refreshCounts(user.id), 10000);
     };
     init();
     return () => clearInterval(interval);

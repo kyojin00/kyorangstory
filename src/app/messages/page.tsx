@@ -2,21 +2,21 @@
 
 // src/app/messages/page.tsx
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import SidebarLayout from '@/components/SidebarLayout';
 
 interface ChatRoom {
-  partner_id:      string;
+  partner_id:       string;
   partner_username: string;
-  partner_name:    string;
-  partner_avatar:  string;
-  last_message:    string;
-  last_time:       string;
-  unread_count:    number;
-  is_sent:         boolean; // 내가 보낸 마지막 메시지인지
+  partner_name:     string;
+  partner_avatar:   string;
+  last_message:     string;
+  last_time:        string;
+  unread_count:     number;
+  is_sent:          boolean;
 }
 
 function timeAgo(dateStr: string): string {
@@ -33,207 +33,319 @@ function timeAgo(dateStr: string): string {
 }
 
 function Avatar({ url, name, size = 50 }: { url?: string; name?: string; size?: number }) {
-  const initial = (name ?? '?').charAt(0).toUpperCase();
   if (url) return (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={url} alt={name ?? ''} style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+    <img src={url} alt={name ?? ''} style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, border: '2px solid #1a1830' }} />
   );
   return (
-    <div style={{ width: size, height: size, borderRadius: '50%', flexShrink: 0, background: 'linear-gradient(135deg, #7c3aed, #4c1d95)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.38, fontWeight: 700, color: '#fff' }}>
-      {initial}
+    <div style={{ width: size, height: size, borderRadius: '50%', flexShrink: 0, background: 'linear-gradient(135deg, #7c3aed, #4c1d95)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.36, fontWeight: 700, color: '#fff' }}>
+      {(name ?? '?').charAt(0).toUpperCase()}
     </div>
   );
 }
 
 export default function MessagesPage() {
-  const [rooms,   setRooms]   = useState<ChatRoom[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [myId,    setMyId]    = useState<string | null>(null);
-  const [search,  setSearch]  = useState('');
+  const [rooms,      setRooms]      = useState<ChatRoom[]>([]);
+  const [loading,    setLoading]    = useState(true);
+  const [search,     setSearch]     = useState('');
+  const [totalUnread, setTotalUnread] = useState(0);
+  const myIdRef      = useRef<string | null>(null);
+  const profileCache = useRef<Record<string, { username: string; display_name: string; avatar_url: string }>>({});
+  const channelRef   = useRef<ReturnType<ReturnType<typeof createClient>['channel']> | null>(null);
   const router   = useRouter();
   const supabase = createClient();
 
-  useEffect(() => {
-    const init = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { router.replace('/'); return; }
-      setMyId(user.id);
+  // rooms를 ref로도 유지 (realtime 핸들러 클로저용)
+  const roomsRef = useRef<ChatRoom[]>([]);
+  const setRoomsSync = (fn: (prev: ChatRoom[]) => ChatRoom[]) => {
+    setRooms(prev => {
+      const next = fn(prev);
+      roomsRef.current = next;
+      return next;
+    });
+  };
 
-      // 내가 주고받은 모든 메시지
-      const { data: msgs } = await supabase
-        .from('direct_messages')
-        .select('*')
-        .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
-        .order('created_at', { ascending: false });
+  const loadRooms = async (uid: string) => {
+    // 사이드바와 동일: DB에서 직접 미읽음 수 조회
+    const { count } = await supabase
+      .from('direct_messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('receiver_id', uid)
+      .eq('is_read', false);
+    setTotalUnread(count ?? 0);
 
-      if (!msgs?.length) { setLoading(false); return; }
+    const { data: msgs } = await supabase
+      .from('direct_messages')
+      .select('*')
+      .or(`sender_id.eq.${uid},receiver_id.eq.${uid}`)
+      .order('created_at', { ascending: false });
 
-      // 대화 상대별 최신 메시지 추출
-      const roomMap = new Map<string, ChatRoom>();
-      for (const msg of msgs) {
-        const partnerId = msg.sender_id === user.id ? msg.receiver_id : msg.sender_id;
-        if (!roomMap.has(partnerId)) {
-          roomMap.set(partnerId, {
-            partner_id:       partnerId,
-            partner_username: '',
-            partner_name:     '',
-            partner_avatar:   '',
-            last_message:     msg.content,
-            last_time:        msg.created_at,
-            unread_count:     0,
-            is_sent:          msg.sender_id === user.id,
-          });
-        }
-        // 안읽은 수 계산
-        if (msg.receiver_id === user.id && !msg.is_read) {
-          const room = roomMap.get(partnerId)!;
-          room.unread_count++;
-          roomMap.set(partnerId, room);
-        }
+    if (!msgs?.length) { setLoading(false); return; }
+
+    const roomMap = new Map<string, ChatRoom>();
+    for (const msg of msgs) {
+      const partnerId = msg.sender_id === uid ? msg.receiver_id : msg.sender_id;
+      if (!roomMap.has(partnerId)) {
+        roomMap.set(partnerId, {
+          partner_id:       partnerId,
+          partner_username: '',
+          partner_name:     '',
+          partner_avatar:   '',
+          last_message:     msg.content,
+          last_time:        msg.created_at,
+          unread_count:     0,
+          is_sent:          msg.sender_id === uid,
+        });
       }
+      if (msg.receiver_id === uid && !msg.is_read) {
+        const room = roomMap.get(partnerId)!;
+        room.unread_count++;
+        roomMap.set(partnerId, room);
+      }
+    }
 
-      // 파트너 프로필 일괄 조회
-      const partnerIds = [...roomMap.keys()];
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, username, display_name, avatar_url')
-        .in('id', partnerIds);
+    const partnerIds = [...roomMap.keys()];
+    const { data: profiles } = await supabase
+      .from('profiles')
+      .select('id, username, display_name, avatar_url')
+      .in('id', partnerIds);
 
-      const profileMap = Object.fromEntries((profiles ?? []).map(p => [p.id, p]));
+    const profileMap = Object.fromEntries((profiles ?? []).map(p => [p.id, p]));
+    // 캐시 업데이트
+    Object.assign(profileCache.current, profileMap);
 
-      const result: ChatRoom[] = [];
-      for (const [id, room] of roomMap) {
-        const prof = profileMap[id];
-        if (prof) {
-          result.push({
-            ...room,
+    const result: ChatRoom[] = [];
+    for (const [id, room] of roomMap) {
+      const prof = profileMap[id];
+      if (prof) result.push({ ...room, partner_username: prof.username ?? '', partner_name: prof.display_name ?? '알 수 없음', partner_avatar: prof.avatar_url ?? '' });
+    }
+    result.sort((a, b) => new Date(b.last_time).getTime() - new Date(a.last_time).getTime());
+
+    roomsRef.current = result;
+    setRooms(result);
+    setLoading(false);
+  };
+
+  const handleNewMessage = async (msg: {
+    id: string; sender_id: string; receiver_id: string;
+    content: string; created_at: string; is_read: boolean;
+  }) => {
+    const uid = myIdRef.current;
+    if (!uid) return;
+    if (msg.sender_id !== uid && msg.receiver_id !== uid) return;
+
+    const partnerId = msg.sender_id === uid ? msg.receiver_id : msg.sender_id;
+    const isSent    = msg.sender_id === uid;
+
+    // 파트너 프로필 (캐시 우선)
+    let prof = profileCache.current[partnerId];
+    if (!prof) {
+      const { data } = await supabase
+        .from('profiles').select('id, username, display_name, avatar_url')
+        .eq('id', partnerId).maybeSingle();
+      if (data) { profileCache.current[partnerId] = data; prof = data; }
+    }
+    if (!prof) return;
+
+    setRoomsSync(prev => {
+      const existing = prev.find(r => r.partner_id === partnerId);
+      const updated: ChatRoom = existing
+        ? {
+            ...existing,
+            last_message: msg.content,
+            last_time:    msg.created_at,
+            is_sent:      isSent,
+            unread_count: !isSent && !msg.is_read
+              ? existing.unread_count + 1
+              : existing.unread_count,
+          }
+        : {
+            partner_id:       partnerId,
             partner_username: prof.username ?? '',
             partner_name:     prof.display_name ?? '알 수 없음',
             partner_avatar:   prof.avatar_url ?? '',
-          });
-        }
+            last_message:     msg.content,
+            last_time:        msg.created_at,
+            unread_count:     !isSent && !msg.is_read ? 1 : 0,
+            is_sent:          isSent,
+          };
+
+      const rest = prev.filter(r => r.partner_id !== partnerId);
+      return [updated, ...rest];
+    });
+  };
+
+  useEffect(() => {
+    let mounted = true;
+
+    const init = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) { router.replace('/'); return; }   // 로그인 안 된 경우
+      if (!mounted) return;                                           // 언마운트된 경우 조용히 종료
+      myIdRef.current = user.id;
+
+      await loadRooms(user.id);
+      if (!mounted) return;
+
+      // ── Realtime: 내 DM 변경 구독
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
       }
 
-      // 최신순 정렬
-      result.sort((a, b) => new Date(b.last_time).getTime() - new Date(a.last_time).getTime());
-      setRooms(result);
-      setLoading(false);
+      // broadcast 방식 — RLS 필터 문제 없이 작동
+      const channel = supabase
+        .channel(`messages-list-${user.id}`)
+        .on('broadcast', { event: 'dm-update' }, ({ payload }) => {
+          if (mounted) handleNewMessage(payload as any);
+        })
+        .subscribe();
+
+      channelRef.current = channel;
     };
+
     init();
+
+    return () => {
+      mounted = false;
+      if (channelRef.current) {
+        supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+    };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const filtered = rooms.filter(r =>
+  const filtered    = rooms.filter(r =>
     r.partner_name.toLowerCase().includes(search.toLowerCase()) ||
     r.partner_username.toLowerCase().includes(search.toLowerCase())
   );
 
-  const totalUnread = rooms.reduce((sum, r) => sum + r.unread_count, 0);
 
   return (
     <SidebarLayout>
-      <div style={{ maxWidth: '640px', margin: '0 auto', fontFamily: 'sans-serif', color: '#e2e8f0' }}>
+      <div style={{ maxWidth: '660px', margin: '0 auto' }}>
 
-        {/* 헤더 */}
-        <div style={{ borderBottom: '1px solid #1e1b3a', padding: '18px 20px', position: 'sticky', top: 0, background: '#080810', zIndex: 10 }}>
+        {/* ── 헤더 ── */}
+        <div style={{
+          padding: '14px 24px', position: 'sticky', top: 0, zIndex: 10,
+          background: 'rgba(6,6,16,0.9)', backdropFilter: 'blur(16px)',
+          borderBottom: '1px solid #0f0f22',
+        }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <h1 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800, color: '#e2e8f0' }}>메시지</h1>
+              <h1 style={{ margin: 0, fontSize: '1rem', fontWeight: 800, color: '#c4b5fd', letterSpacing: '-0.02em' }}>메시지</h1>
               {totalUnread > 0 && (
-                <span style={{ background: '#7c3aed', color: '#fff', borderRadius: '20px', padding: '2px 8px', fontSize: '0.75rem', fontWeight: 700 }}>
+                <span style={{ background: '#7c3aed', color: '#fff', borderRadius: '999px', padding: '2px 9px', fontSize: '0.72rem', fontWeight: 700, boxShadow: '0 2px 8px rgba(124,58,237,0.4)' }}>
                   {totalUnread}
                 </span>
               )}
             </div>
           </div>
 
-          {/* 검색창 */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', background: '#0f0f1f', border: '1px solid #1e1b3a', borderRadius: '24px', padding: '9px 16px', transition: 'border-color 0.15s' }}
-            onFocus={e => { (e.currentTarget as HTMLElement).style.borderColor = '#7c3aed'; }}
-            onBlur={e  => { (e.currentTarget as HTMLElement).style.borderColor = '#1e1b3a'; }}
+          {/* 검색 */}
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: '10px',
+            background: '#0d0d1f', border: '1.5px solid #1a1830',
+            borderRadius: '14px', padding: '9px 16px', transition: 'border-color 0.2s',
+          }}
+            onFocusCapture={e => { (e.currentTarget as HTMLElement).style.borderColor = '#7c3aed44'; }}
+            onBlurCapture={e  => { (e.currentTarget as HTMLElement).style.borderColor = '#1a1830'; }}
           >
-            <span style={{ color: '#475569', fontSize: '0.9rem' }}>🔎</span>
+            <span style={{ color: '#2d2b50', fontSize: '0.88rem' }}>🔎</span>
             <input
               value={search}
               onChange={e => setSearch(e.target.value)}
               placeholder="대화 검색..."
-              style={{ flex: 1, background: 'transparent', border: 'none', color: '#e2e8f0', fontSize: '0.875rem', outline: 'none', fontFamily: 'sans-serif' }}
+              style={{ flex: 1, background: 'transparent', border: 'none', color: '#c4b5fd', fontSize: '0.875rem', outline: 'none', fontFamily: 'inherit' }}
             />
             {search && (
-              <button onClick={() => setSearch('')} style={{ background: 'transparent', border: 'none', color: '#475569', cursor: 'pointer', fontSize: '0.85rem', padding: 0 }}>✕</button>
+              <button onClick={() => setSearch('')} style={{ background: 'transparent', border: 'none', color: '#2d2b50', cursor: 'pointer', fontSize: '0.8rem', padding: '2px 6px', borderRadius: '6px', fontFamily: 'inherit' }}>✕</button>
             )}
           </div>
         </div>
 
-        {/* 목록 */}
+        {/* ── 목록 ── */}
         {loading ? (
-          <p style={{ textAlign: 'center', color: '#64748b', padding: '60px 0' }}>불러오는 중...</p>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '10px', padding: '64px 0', color: '#2d2b50', fontSize: '0.84rem' }}>
+            <div style={{ width: 16, height: 16, borderRadius: '50%', border: '2px solid #1a1830', borderTopColor: '#7c3aed', animation: 'spin 0.8s linear infinite' }} />
+            <style dangerouslySetInnerHTML={{ __html: '@keyframes spin{to{transform:rotate(360deg)}}' }} />
+            불러오는 중...
+          </div>
         ) : filtered.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '80px 20px', color: '#334155' }}>
+          <div style={{ textAlign: 'center', padding: '80px 20px' }}>
             <p style={{ fontSize: '2.5rem', margin: '0 0 14px' }}>💬</p>
-            <p style={{ fontSize: '0.9rem', margin: '0 0 16px' }}>
+            <p style={{ margin: '0 0 6px', fontSize: '0.9rem', color: '#2d2b50', fontWeight: 600 }}>
               {search ? `"${search}" 검색 결과가 없어요` : '아직 대화가 없어요'}
             </p>
             {!search && (
-              <Link href="/search" style={{ background: '#7c3aed', color: '#fff', borderRadius: '20px', padding: '8px 20px', textDecoration: 'none', fontSize: '0.875rem', fontWeight: 700 }}>
+              <Link href="/search" style={{
+                display: 'inline-block', marginTop: '16px',
+                background: 'linear-gradient(135deg, #7c3aed, #5b21b6)',
+                color: '#fff', borderRadius: '12px', padding: '9px 22px',
+                textDecoration: 'none', fontSize: '0.875rem', fontWeight: 700,
+                boxShadow: '0 4px 16px rgba(124,58,237,0.3)',
+              }}>
                 🔎 사람 찾기
               </Link>
             )}
           </div>
         ) : filtered.map(room => (
-          <Link
-            key={room.partner_id}
-            href={`/messages/${room.partner_username}`}
-            style={{ textDecoration: 'none' }}
-          >
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: '14px',
-              padding: '14px 20px', borderBottom: '1px solid #1e1b3a',
-              transition: 'background 0.1s', position: 'relative',
-              background: room.unread_count > 0 ? '#0a0818' : 'transparent',
-            }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#0a0a16'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = room.unread_count > 0 ? '#0a0818' : 'transparent'; }}
-            >
-              {/* 아바타 */}
-              <div style={{ position: 'relative' }}>
-                <Avatar url={room.partner_avatar} name={room.partner_name} size={50} />
-                {room.unread_count > 0 && (
-                  <div style={{ position: 'absolute', bottom: 0, right: 0, width: 14, height: 14, borderRadius: '50%', background: '#22c55e', border: '2px solid #080810' }} />
-                )}
-              </div>
-
-              {/* 내용 */}
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '3px' }}>
-                  <span style={{ fontWeight: room.unread_count > 0 ? 800 : 600, fontSize: '0.9rem', color: '#e2e8f0' }}>
-                    {room.partner_name}
-                  </span>
-                  <span style={{ fontSize: '0.72rem', color: room.unread_count > 0 ? '#7c3aed' : '#334155', flexShrink: 0 }}>
-                    {timeAgo(room.last_time)}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
-                  <p style={{
-                    margin: 0, fontSize: '0.82rem',
-                    color: room.unread_count > 0 ? '#94a3b8' : '#475569',
-                    fontWeight: room.unread_count > 0 ? 600 : 400,
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
-                  }}>
-                    {room.is_sent && <span style={{ color: '#475569', marginRight: '4px' }}>나:</span>}
-                    {room.last_message}
-                  </p>
-                  {room.unread_count > 0 && (
-                    <span style={{ background: '#7c3aed', color: '#fff', borderRadius: '50%', minWidth: '20px', height: '20px', fontSize: '0.65rem', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, flexShrink: 0, padding: '0 4px' }}>
-                      {room.unread_count > 99 ? '99+' : room.unread_count}
-                    </span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </Link>
+          <RoomRow key={room.partner_id} room={room} />
         ))}
       </div>
     </SidebarLayout>
+  );
+}
+
+function RoomRow({ room }: { room: ChatRoom }) {
+  const [hov, setHov] = useState(false);
+  return (
+    <Link href={`/messages/${room.partner_username}`} style={{ textDecoration: 'none' }}>
+      <div
+        onMouseEnter={() => setHov(true)}
+        onMouseLeave={() => setHov(false)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: '14px',
+          padding: '14px 24px', borderBottom: '1px solid #0f0f22',
+          background: hov ? '#09091a' : room.unread_count > 0 ? '#0a0818' : 'transparent',
+          transition: 'background 0.15s',
+        }}
+      >
+        <Avatar url={room.partner_avatar} name={room.partner_name} size={48} />
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '4px' }}>
+            <span style={{ fontWeight: room.unread_count > 0 ? 800 : 600, fontSize: '0.9rem', color: '#c4b5fd' }}>
+              {room.partner_name}
+            </span>
+            <span suppressHydrationWarning style={{ fontSize: '0.7rem', color: room.unread_count > 0 ? '#7c3aed' : '#1e1c3a', flexShrink: 0 }}>
+              {timeAgo(room.last_time)}
+            </span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
+            <p style={{
+              margin: 0, fontSize: '0.82rem',
+              color: room.unread_count > 0 ? '#7c6fa0' : '#2d2b50',
+              fontWeight: room.unread_count > 0 ? 600 : 400,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1,
+            }}>
+              {room.is_sent && <span style={{ color: '#1e1c3a', marginRight: '4px' }}>나:</span>}
+              {room.last_message}
+            </p>
+            {room.unread_count > 0 && (
+              <span style={{
+                background: '#7c3aed', color: '#fff', borderRadius: '999px',
+                minWidth: '20px', height: '20px', fontSize: '0.62rem',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                fontWeight: 700, flexShrink: 0, padding: '0 5px',
+                boxShadow: '0 2px 8px rgba(124,58,237,0.4)',
+              }}>
+                {room.unread_count > 99 ? '99+' : room.unread_count}
+              </span>
+            )}
+          </div>
+        </div>
+      </div>
+    </Link>
   );
 }

@@ -56,13 +56,20 @@ export default function DMChatPage() {
 
   const bottomRef  = useRef<HTMLDivElement>(null);
   const inputRef   = useRef<HTMLTextAreaElement>(null);
-  const channelRef   = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const channelRef     = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const myListChRef    = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const ptListChRef    = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const myIdRef      = useRef<string | null>(null);
   const partnerRef   = useRef<Profile | null>(null);
 
   useEffect(() => {
     if (!username) return;
+
+    // ✅ 비동기 완료 전에 즉시 동기 등록 → 새로고침 시 뱃지 차단
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('active_dm_username', username);
+    }
 
     let mounted = true;
 
@@ -111,6 +118,11 @@ export default function DMChatPage() {
         await supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
+      // messages-list 채널 구독 (broadcast send를 위해 반드시 subscribe 필요)
+      if (myListChRef.current) supabase.removeChannel(myListChRef.current);
+      if (ptListChRef.current) supabase.removeChannel(ptListChRef.current);
+      myListChRef.current = supabase.channel(`messages-list-${user.id}`).subscribe();
+      ptListChRef.current = supabase.channel(`messages-list-${prof.id}`).subscribe();
 
       const roomId  = [user.id, prof.id].sort().join('-');
       const channel = supabase.channel(`dm-${roomId}`);
@@ -139,11 +151,16 @@ export default function DMChatPage() {
         heartbeatRef.current = null;
       }
       // 채팅방 퇴장 등록
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('active_dm_username');
+      }
       fetch('/api/dm-room-active', { method: 'DELETE' });
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
         channelRef.current = null;
       }
+      if (myListChRef.current) { supabase.removeChannel(myListChRef.current); myListChRef.current = null; }
+      if (ptListChRef.current) { supabase.removeChannel(ptListChRef.current); ptListChRef.current = null; }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [username]);
@@ -175,6 +192,13 @@ export default function DMChatPage() {
           event:   'new-message',
           payload: msg,
         });
+      }
+      // 메시지 목록 페이지 실시간 업데이트용 broadcast (구독된 채널 사용)
+      if (myListChRef.current) {
+        await myListChRef.current.send({ type: 'broadcast', event: 'dm-update', payload: msg });
+      }
+      if (ptListChRef.current) {
+        await ptListChRef.current.send({ type: 'broadcast', event: 'dm-update', payload: msg });
       }
     }
     setSending(false);

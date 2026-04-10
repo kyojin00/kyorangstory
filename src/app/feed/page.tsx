@@ -6,6 +6,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
+import { getProfileCached } from '@/lib/profileCache';
 import { Post } from '@/types/profile';
 import SidebarLayout from '@/components/SidebarLayout';
 import ReportModal from '@/components/ReportModal';
@@ -370,17 +371,20 @@ export default function FeedPage() {
   }, []);
 
   useEffect(() => {
+    let mounted = true;
     const init = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { router.replace('/'); return; }
-      const res  = await fetch('/api/profile');
-      const data = await res.json();
+      if (!mounted) return;
+      const data = await getProfileCached();
+      if (!mounted) return;
       if (!data?.username) { setState('no-profile'); setTimeout(() => router.replace('/profile/setup'), 1500); return; }
-      setMyProfile({ ...data, id: user.id });
+      setMyProfile({ ...(data as any), id: user.id });
       setState('ready');
       fetchPosts('all', 0, true);
     };
     init();
+    return () => { mounted = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
