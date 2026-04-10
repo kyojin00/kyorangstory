@@ -3,12 +3,15 @@
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
 
+const DEFAULT_LIMIT = 15;
+
 export async function GET(req: NextRequest) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
 
   const { searchParams } = new URL(req.url);
-  const offset = parseInt(searchParams.get('offset') || '0', 10);
+  const offset = parseInt(searchParams.get('offset') ?? '0', 10);
+  const limit  = parseInt(searchParams.get('limit')  ?? String(DEFAULT_LIMIT), 10);
   const userId = searchParams.get('user_id');
   const feed   = searchParams.get('feed');
 
@@ -25,7 +28,7 @@ export async function GET(req: NextRequest) {
       .from('posts').select('*')
       .in('user_id', followingIds)
       .order('created_at', { ascending: false })
-      .range(offset, offset + 19);
+      .range(offset, offset + limit - 1);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     if (!posts?.length) return NextResponse.json([]);
@@ -33,10 +36,10 @@ export async function GET(req: NextRequest) {
     return NextResponse.json(await mergeProfiles(supabase, user.id, posts));
   }
 
-  // 전체 피드
+  // 전체 피드 / 유저 피드
   let query = supabase.from('posts').select('*')
     .order('created_at', { ascending: false })
-    .range(offset, offset + 19);
+    .range(offset, offset + limit - 1);
 
   if (userId) query = query.eq('user_id', userId);
 
