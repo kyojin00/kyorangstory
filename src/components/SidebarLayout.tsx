@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
@@ -9,7 +10,7 @@ interface MyProfile { username: string; display_name: string; avatar_url: string
 
 let _cachedPartner: { username: string; id: string } | null = null;
 
-interface Props { children: React.ReactNode; rightPanel?: React.ReactNode; }
+interface Props { children: ReactNode; rightPanel?: ReactNode; }
 
 const NAV_STATIC = [
   { icon: '📝', label: '피드',          href: '/feed',           badge: 0, divider: false },
@@ -135,7 +136,7 @@ export default function SidebarLayout({ children, rightPanel }: Props) {
     }}>
       <div style={{
         width: '100%',
-        maxWidth: '1400px',
+        maxWidth: '1500px',
         display: 'flex',
         position: 'relative',
       }}>
@@ -295,7 +296,7 @@ export default function SidebarLayout({ children, rightPanel }: Props) {
         {/* ── 우측 패널 ── */}
         {rightPanel && (
           <aside style={{
-            width: '300px',
+            width: '320px',
             flexShrink: 0,
             position: 'sticky',
             top: 0,
