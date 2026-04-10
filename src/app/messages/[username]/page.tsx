@@ -26,20 +26,17 @@ interface Profile {
 
 function timeStr(dateStr: string): string {
   const d = new Date(dateStr);
-  const h = d.getHours().toString().padStart(2, '0');
-  const m = d.getMinutes().toString().padStart(2, '0');
-  return `${h}:${m}`;
+  return `${d.getHours().toString().padStart(2,'0')}:${d.getMinutes().toString().padStart(2,'0')}`;
 }
 
 function Avatar({ url, name, size = 36 }: { url?: string; name?: string; size?: number }) {
-  const initial = (name ?? '?').charAt(0).toUpperCase();
   if (url) return (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={url} alt={name ?? ''} style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+    <img src={url} alt={name ?? ''} style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, border: '2px solid #1a1830' }} />
   );
   return (
-    <div style={{ width: size, height: size, borderRadius: '50%', flexShrink: 0, background: 'linear-gradient(135deg, #7c3aed, #4c1d95)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.38, fontWeight: 700, color: '#fff' }}>
-      {initial}
+    <div style={{ width: size, height: size, borderRadius: '50%', flexShrink: 0, background: 'linear-gradient(135deg, #7c3aed, #4c1d95)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: size * 0.36, fontWeight: 700, color: '#fff' }}>
+      {(name ?? '?').charAt(0).toUpperCase()}
     </div>
   );
 }
@@ -50,77 +47,84 @@ export default function DMChatPage() {
   const router   = useRouter();
   const supabase = createClient();
 
-  const [myId,      setMyId]      = useState<string | null>(null);
-  const [partner,   setPartner]   = useState<Profile | null>(null);
-  const [messages,  setMessages]  = useState<Message[]>([]);
-  const [input,     setInput]     = useState('');
-  const [sending,   setSending]   = useState(false);
-  const [loading,   setLoading]   = useState(true);
-  const [isOnline,  setIsOnline]  = useState(false);
+  const [myId,     setMyId]     = useState<string | null>(null);
+  const [partner,  setPartner]  = useState<Profile | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [input,    setInput]    = useState('');
+  const [sending,  setSending]  = useState(false);
+  const [loading,  setLoading]  = useState(true);
 
-  const bottomRef   = useRef<HTMLDivElement>(null);
-  const inputRef    = useRef<HTMLTextAreaElement>(null);
-  const channelRef  = useRef<any>(null);
+  const bottomRef  = useRef<HTMLDivElement>(null);
+  const inputRef   = useRef<HTMLTextAreaElement>(null);
+  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const myIdRef    = useRef<string | null>(null);   // send에서 클로저 없이 사용
+  const partnerRef = useRef<Profile | null>(null);
 
   useEffect(() => {
     if (!username) return;
 
+    let mounted = true;
+
     const init = async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { router.replace('/'); return; }
+      if (!user || !mounted) return;
       setMyId(user.id);
+      myIdRef.current = user.id;
 
-      // 상대방 프로필
       const { data: prof } = await supabase
         .from('profiles').select('id, username, display_name, avatar_url')
         .eq('username', username).maybeSingle();
-      if (!prof) { router.replace('/messages'); return; }
+      if (!prof || !mounted) { router.replace('/messages'); return; }
       setPartner(prof);
+      partnerRef.current = prof;
 
-      // 기존 메시지 로드
+      // 채팅방 입장 등록 (알림 차단용)
+      const registerActive = () =>
+        fetch('/api/dm-room-active', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ partner_id: prof.id }),
+        });
+      await registerActive();
+      // 25초마다 갱신 (서버 30초 TTL 유지)
+      heartbeatRef.current = setInterval(registerActive, 25_000);
+
       const { data: msgs } = await supabase
         .from('direct_messages').select('*')
         .or(`and(sender_id.eq.${user.id},receiver_id.eq.${prof.id}),and(sender_id.eq.${prof.id},receiver_id.eq.${user.id})`)
         .order('created_at', { ascending: true })
         .limit(100);
-      setMessages(msgs ?? []);
-      setLoading(false);
+      if (mounted) { setMessages(msgs ?? []); setLoading(false); }
 
-      // 읽음 처리
       await supabase.from('direct_messages')
         .update({ is_read: true })
         .eq('sender_id', prof.id)
         .eq('receiver_id', user.id)
         .eq('is_read', false);
 
-      // ── Supabase Broadcast 실시간 구독
-      const roomId = [user.id, prof.id].sort().join('-');
+      if (!mounted) return;
+
+      // ── Realtime 채널 구독
+      // 이미 존재하는 채널 있으면 먼저 제거
+      if (channelRef.current) {
+        await supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
+
+      const roomId  = [user.id, prof.id].sort().join('-');
       const channel = supabase.channel(`dm-${roomId}`);
 
+      // ✅ subscribe() 전에 모든 콜백 등록
       channel
         .on('broadcast', { event: 'new-message' }, ({ payload }) => {
           const msg = payload as Message;
-          setMessages(prev => {
-            // 중복 방지
-            if (prev.some(m => m.id === msg.id)) return prev;
-            return [...prev, msg];
-          });
-          // 상대방 메시지 읽음 처리
+          setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg]);
           if (msg.sender_id !== user.id) {
-            supabase.from('direct_messages')
-              .update({ is_read: true })
-              .eq('id', msg.id);
+            supabase.from('direct_messages').update({ is_read: true }).eq('id', msg.id);
           }
         })
-        .on('presence', { event: 'sync' }, () => {
-          const state = channel.presenceState();
-          setIsOnline(Object.keys(state).length > 1);
-        })
-        .subscribe(async (status) => {
-          if (status === 'SUBSCRIBED') {
-            await channel.track({ user_id: user.id, online_at: new Date().toISOString() });
-          }
-        });
+
+        .subscribe();
 
       channelRef.current = channel;
     };
@@ -128,8 +132,16 @@ export default function DMChatPage() {
     init();
 
     return () => {
+      mounted = false;
+      if (heartbeatRef.current) {
+        clearInterval(heartbeatRef.current);
+        heartbeatRef.current = null;
+      }
+      // 채팅방 퇴장 등록
+      fetch('/api/dm-room-active', { method: 'DELETE' });
       if (channelRef.current) {
         supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -140,43 +152,42 @@ export default function DMChatPage() {
   }, [messages]);
 
   const handleSend = async () => {
+    const myId   = myIdRef.current;
+    const partner = partnerRef.current;
     if (!input.trim() || sending || !myId || !partner) return;
     setSending(true);
     const text = input.trim();
     setInput('');
 
-    // DB 저장
     const { data: msg, error } = await supabase
       .from('direct_messages')
       .insert({ sender_id: myId, receiver_id: partner.id, content: text })
       .select().single();
 
     if (!error && msg) {
-      // 낙관적 업데이트
       setMessages(prev => prev.some(m => m.id === msg.id) ? prev : [...prev, msg]);
 
-      // Broadcast로 상대방에게 실시간 전송
-      const roomId = [myId, partner.id].sort().join('-');
-      await supabase.channel(`dm-${roomId}`).send({
-        type:    'broadcast',
-        event:   'new-message',
-        payload: msg,
-      });
+      // ✅ 새 channel() 호출 대신 이미 구독된 channelRef 사용
+      if (channelRef.current) {
+        await channelRef.current.send({
+          type:    'broadcast',
+          event:   'new-message',
+          payload: msg,
+        });
+      }
     }
     setSending(false);
   };
 
-  // 날짜 구분선
+  // 날짜 구분
   const getDateLabel = (dateStr: string) => {
-    const d     = new Date(dateStr);
-    const today = new Date();
-    const diff  = Math.floor((today.getTime() - d.getTime()) / 86400000);
+    const d    = new Date(dateStr);
+    const diff = Math.floor((Date.now() - d.getTime()) / 86400000);
     if (diff === 0) return '오늘';
     if (diff === 1) return '어제';
-    return `${d.getFullYear()}.${d.getMonth() + 1}.${d.getDate()}`;
+    return `${d.getFullYear()}.${d.getMonth()+1}.${d.getDate()}`;
   };
 
-  // 날짜별 그룹
   const grouped: { label: string; messages: Message[] }[] = [];
   messages.forEach(msg => {
     const label = getDateLabel(msg.created_at);
@@ -187,75 +198,80 @@ export default function DMChatPage() {
 
   if (loading) return (
     <SidebarLayout>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', color: '#64748b', fontFamily: 'sans-serif' }}>불러오는 중...</div>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
+        <div style={{ width: 32, height: 32, borderRadius: '50%', border: '3px solid #1a1830', borderTopColor: '#7c3aed', animation: 'spin 0.8s linear infinite' }} />
+        <style dangerouslySetInnerHTML={{ __html: '@keyframes spin{to{transform:rotate(360deg)}}' }} />
+      </div>
     </SidebarLayout>
   );
 
   return (
     <SidebarLayout>
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', maxWidth: '700px', margin: '0 auto', fontFamily: 'sans-serif', color: '#e2e8f0' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', maxWidth: '700px', margin: '0 auto' }}>
 
-        {/* 헤더 */}
-        <div style={{ borderBottom: '1px solid #1e1b3a', padding: '14px 20px', display: 'flex', alignItems: 'center', gap: '12px', background: '#080810', flexShrink: 0, position: 'sticky', top: 0, zIndex: 10 }}>
-          <button onClick={() => router.back()} style={{ background: 'transparent', border: 'none', color: '#a78bfa', cursor: 'pointer', fontSize: '1.2rem', padding: 0, lineHeight: 1 }}>←</button>
+        {/* ── 헤더 ── */}
+        <div style={{
+          borderBottom: '1px solid #0f0f22', padding: '13px 20px',
+          display: 'flex', alignItems: 'center', gap: '12px',
+          background: 'rgba(6,6,16,0.95)', backdropFilter: 'blur(16px)',
+          flexShrink: 0, position: 'sticky', top: 0, zIndex: 10,
+        }}>
+          <button
+            onClick={() => router.back()}
+            style={{ background: '#12112a', border: 'none', color: '#a78bfa', cursor: 'pointer', fontSize: '0.85rem', fontWeight: 600, padding: '7px 10px', borderRadius: '10px', lineHeight: 1, fontFamily: 'inherit' }}
+          >←</button>
           <Link href={`/profile/${username}`} style={{ textDecoration: 'none', display: 'flex', alignItems: 'center', gap: '10px' }}>
             <Avatar url={partner?.avatar_url} name={partner?.display_name} size={38} />
             <div>
-              <p style={{ margin: 0, fontWeight: 700, fontSize: '0.9rem', color: '#e2e8f0' }}>{partner?.display_name}</p>
-              <p style={{ margin: 0, fontSize: '0.72rem', color: isOnline ? '#22c55e' : '#475569' }}>
-                {isOnline ? '● 온라인' : `@${username}`}
-              </p>
+              <p style={{ margin: 0, fontWeight: 700, fontSize: '0.9rem', color: '#c4b5fd', letterSpacing: '-0.01em' }}>{partner?.display_name}</p>
+              <p style={{ margin: 0, fontSize: '0.7rem', color: '#2d2b50', marginTop: '1px' }}>@{username}</p>
             </div>
           </Link>
         </div>
 
-        {/* 메시지 목록 */}
+        {/* ── 메시지 목록 ── */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '16px 20px' }}>
           {messages.length === 0 ? (
-            <div style={{ textAlign: 'center', paddingTop: '60px', color: '#334155' }}>
-              <p style={{ fontSize: '2rem', margin: '0 0 12px' }}>💬</p>
-              <p style={{ fontSize: '0.875rem' }}>{partner?.display_name}님과 대화를 시작해보세요!</p>
+            <div style={{ textAlign: 'center', paddingTop: '64px' }}>
+              <p style={{ fontSize: '2.5rem', margin: '0 0 14px' }}>💬</p>
+              <p style={{ margin: 0, fontSize: '0.88rem', color: '#2d2b50', fontWeight: 600 }}>
+                {partner?.display_name}님과 대화를 시작해보세요!
+              </p>
             </div>
           ) : (
             grouped.map(group => (
               <div key={group.label}>
-                {/* 날짜 구분선 */}
                 <div style={{ display: 'flex', alignItems: 'center', gap: '12px', margin: '16px 0 12px' }}>
-                  <div style={{ flex: 1, height: '1px', background: '#1e1b3a' }} />
-                  <span style={{ fontSize: '0.72rem', color: '#334155', flexShrink: 0 }}>{group.label}</span>
-                  <div style={{ flex: 1, height: '1px', background: '#1e1b3a' }} />
+                  <div style={{ flex: 1, height: '1px', background: '#0f0f22' }} />
+                  <span style={{ fontSize: '0.7rem', color: '#1e1c3a', flexShrink: 0 }}>{group.label}</span>
+                  <div style={{ flex: 1, height: '1px', background: '#0f0f22' }} />
                 </div>
-
-                {/* 메시지들 */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
                   {group.messages.map((msg, i) => {
-                    const isMe   = msg.sender_id === myId;
-                    const prev   = group.messages[i - 1];
+                    const isMe       = msg.sender_id === myId;
+                    const prev       = group.messages[i - 1];
                     const showAvatar = !isMe && prev?.sender_id !== msg.sender_id;
-
                     return (
-                      <div key={msg.id} style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start', alignItems: 'flex-end', gap: '8px', marginBottom: '2px' }}>
-                        {/* 상대방 아바타 */}
+                      <div key={msg.id} style={{ display: 'flex', justifyContent: isMe ? 'flex-end' : 'flex-start', alignItems: 'flex-end', gap: '8px' }}>
                         {!isMe && (
-                          <div style={{ width: 32, flexShrink: 0 }}>
-                            {showAvatar && <Avatar url={partner?.avatar_url} name={partner?.display_name} size={30} />}
+                          <div style={{ width: 30, flexShrink: 0 }}>
+                            {showAvatar && <Avatar url={partner?.avatar_url} name={partner?.display_name} size={28} />}
                           </div>
                         )}
-
-                        <div style={{ display: 'flex', flexDirection: isMe ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: '6px', maxWidth: '70%' }}>
+                        <div style={{ display: 'flex', flexDirection: isMe ? 'row-reverse' : 'row', alignItems: 'flex-end', gap: '5px', maxWidth: '68%' }}>
                           <div style={{
-                            background:   isMe ? '#7c3aed' : '#1e1b3a',
+                            background:   isMe ? 'linear-gradient(135deg, #7c3aed, #5b21b6)' : '#12112a',
                             color:        '#e2e8f0',
                             borderRadius: isMe ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
                             padding:      '10px 14px',
-                            fontSize:     '0.9rem', lineHeight: 1.6,
+                            fontSize:     '0.88rem', lineHeight: 1.65,
                             wordBreak:    'break-word',
+                            boxShadow:    isMe ? '0 2px 8px rgba(124,58,237,0.25)' : 'none',
                           }}>
                             {msg.content}
                           </div>
-                          <span style={{ fontSize: '0.65rem', color: '#334155', flexShrink: 0, marginBottom: '4px' }}>
+                          <span suppressHydrationWarning style={{ fontSize: '0.62rem', color: '#1e1c3a', flexShrink: 0, marginBottom: '4px' }}>
                             {timeStr(msg.created_at)}
-                            {isMe && <span style={{ marginLeft: '3px', color: msg.is_read ? '#7c3aed' : '#334155' }}>{msg.is_read ? '읽음' : '•'}</span>}
                           </span>
                         </div>
                       </div>
@@ -268,8 +284,11 @@ export default function DMChatPage() {
           <div ref={bottomRef} />
         </div>
 
-        {/* 입력창 */}
-        <div style={{ borderTop: '1px solid #1e1b3a', padding: '12px 20px 16px', background: '#080810', flexShrink: 0 }}>
+        {/* ── 입력창 ── */}
+        <div style={{
+          borderTop: '1px solid #0f0f22', padding: '12px 20px 16px',
+          background: '#08081a', flexShrink: 0,
+        }}>
           <div style={{ display: 'flex', gap: '10px', alignItems: 'flex-end' }}>
             <textarea
               ref={inputRef}
@@ -279,15 +298,15 @@ export default function DMChatPage() {
               placeholder="메시지를 입력하세요..."
               rows={1}
               style={{
-                flex: 1, background: '#0f0f1f', border: '1px solid #1e1b3a',
-                borderRadius: '22px', padding: '11px 18px', color: '#e2e8f0',
-                fontSize: '0.9rem', outline: 'none', resize: 'none',
-                fontFamily: 'sans-serif', maxHeight: '120px', overflowY: 'auto',
-                lineHeight: 1.5, transition: 'border-color 0.15s',
+                flex: 1, background: '#0d0d1f', border: '1.5px solid #1a1830',
+                borderRadius: '20px', padding: '11px 18px', color: '#c4b5fd',
+                fontSize: '0.88rem', outline: 'none', resize: 'none',
+                fontFamily: 'inherit', maxHeight: '120px', overflowY: 'auto',
+                lineHeight: 1.55, transition: 'border-color 0.15s',
               }}
-              onFocus={e  => { e.target.style.borderColor = '#7c3aed'; }}
-              onBlur={e   => { e.target.style.borderColor = '#1e1b3a'; }}
-              onInput={e => {
+              onFocus={e  => { e.target.style.borderColor = '#7c3aed44'; }}
+              onBlur={e   => { e.target.style.borderColor = '#1a1830'; }}
+              onInput={e  => {
                 const el = e.currentTarget;
                 el.style.height = 'auto';
                 el.style.height = Math.min(el.scrollHeight, 120) + 'px';
@@ -298,15 +317,14 @@ export default function DMChatPage() {
               disabled={!input.trim() || sending}
               style={{
                 width: 44, height: 44, borderRadius: '50%', border: 'none', flexShrink: 0,
-                background: input.trim() && !sending ? '#7c3aed' : '#1e1b3a',
-                color:      input.trim() && !sending ? '#fff'    : '#475569',
-                fontSize:   '1.1rem', cursor: input.trim() && !sending ? 'pointer' : 'not-allowed',
+                background: input.trim() && !sending ? 'linear-gradient(135deg,#7c3aed,#5b21b6)' : '#12112a',
+                color:      input.trim() && !sending ? '#fff' : '#2d2b50',
+                fontSize:   '1rem', cursor: input.trim() && !sending ? 'pointer' : 'not-allowed',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: input.trim() && !sending ? '0 4px 12px rgba(124,58,237,0.3)' : 'none',
                 transition: 'all 0.15s',
               }}
-            >
-              {sending ? '⏳' : '↑'}
-            </button>
+            >{sending ? '⏳' : '↑'}</button>
           </div>
         </div>
       </div>
