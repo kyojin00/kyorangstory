@@ -1,17 +1,11 @@
 'use client';
-
-// src/components/StoryHeader.tsx
-
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
 import type { User } from '@supabase/supabase-js';
 
-interface Props {
-  title?:    string;
-  showBack?: boolean;
-}
+interface Props { title?: string; showBack?: boolean; }
 
 export default function StoryHeader({ title = '교랑 스토리', showBack = false }: Props) {
   const [user, setUser] = useState<User | null>(null);
@@ -24,148 +18,84 @@ export default function StoryHeader({ title = '교랑 스토리', showBack = fal
   }, []);
 
   const avatarUrl = user?.user_metadata?.avatar_url as string | undefined;
-  const name      = (user?.user_metadata?.full_name as string)
-                 || (user?.user_metadata?.name as string)
-                 || user?.email?.split('@')[0]
-                 || '익명';
-  const initial   = name.charAt(0).toUpperCase();
+  const name = (user?.user_metadata?.full_name as string) || (user?.user_metadata?.name as string) || user?.email?.split('@')[0] || '익명';
+  const initial = name.charAt(0).toUpperCase();
 
   return (
     <div style={{
-      borderBottom: '1px solid #1e1b3a',
-      padding: '14px 20px',
-      display: 'flex',
-      alignItems: 'center',
-      gap: '10px',
-      position: 'sticky',
-      top: 0,
-      background: '#080810',
-      zIndex: 10,
+      padding: '12px 20px', display: 'flex', alignItems: 'center', gap: '10px',
+      position: 'sticky', top: 0, zIndex: 10,
+      background: 'rgba(6,6,16,0.9)', backdropFilter: 'blur(16px)',
+      borderBottom: '1px solid #12112a',
     }}>
-
-      {/* 뒤로가기 */}
       {showBack && (
         <button
           onClick={() => router.back()}
           style={{
-            background: 'transparent',
-            border: 'none',
-            color: '#a78bfa',
-            cursor: 'pointer',
-            fontSize: '1.3rem',
-            padding: 0,
-            lineHeight: 1,
-            flexShrink: 0,
+            background: '#12112a', border: 'none', color: '#a78bfa',
+            cursor: 'pointer', fontSize: '0.9rem', padding: '7px 10px',
+            borderRadius: '10px', lineHeight: 1, flexShrink: 0,
+            transition: 'background 0.15s',
           }}
+          onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#1e1b3a'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = '#12112a'; }}
         >
-          ←
+          ← 뒤로
         </button>
       )}
 
-      {/* 타이틀 */}
-      <h1 style={{
-        margin: 0,
-        fontSize: '1.05rem',
-        fontWeight: 700,
-        color: '#a78bfa',
-        flex: 1,
-      }}>
+      <h1 style={{ margin: 0, fontSize: '0.95rem', fontWeight: 800, color: '#c4b5fd', flex: 1, letterSpacing: '-0.02em' }}>
         {!showBack && '🌙 '}{title}
       </h1>
 
-      {/* 피드 이동 버튼 */}
       <Link
         href="/feed"
         style={{
-          fontSize: '0.78rem',
-          color: '#64748b',
-          border: '1px solid #1e1b3a',
-          borderRadius: '16px',
-          padding: '5px 12px',
-          textDecoration: 'none',
-          fontWeight: 600,
-          flexShrink: 0,
+          fontSize: '0.75rem', color: '#4a5568',
+          border: '1px solid #1a1830', borderRadius: '10px',
+          padding: '6px 12px', textDecoration: 'none', fontWeight: 600, flexShrink: 0,
+          transition: 'all 0.15s',
         }}
+        onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = '#7c3aed44'; el.style.color = '#7c6fa0'; }}
+        onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = '#1a1830'; el.style.color = '#4a5568'; }}
       >
         🏠 피드
       </Link>
 
-      {/* 프로필 아바타 */}
       {user ? (
         <button
           onClick={() => router.push('/story/my')}
-          title={name}
           style={{
-            background: 'transparent',
-            border: 'none',
-            cursor: 'pointer',
-            padding: 0,
-            flexShrink: 0,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
+            background: 'transparent', border: 'none', cursor: 'pointer',
+            padding: 0, flexShrink: 0, display: 'flex', alignItems: 'center', gap: '8px',
           }}
         >
-          <span style={{
-            fontSize: '0.8rem',
-            color: '#94a3b8',
-            maxWidth: '80px',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}>
+          <span style={{ fontSize: '0.75rem', color: '#3d3660', maxWidth: '72px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {name}
           </span>
-
           {avatarUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={avatarUrl}
-              alt={name}
-              style={{
-                width: '32px',
-                height: '32px',
-                borderRadius: '50%',
-                border: '2px solid #7c3aed',
-                objectFit: 'cover',
-              }}
-            />
+            <img src={avatarUrl} alt={name} style={{ width: 32, height: 32, borderRadius: '50%', border: '2px solid #7c3aed44', objectFit: 'cover' }} />
           ) : (
             <div style={{
-              width: '32px',
-              height: '32px',
-              borderRadius: '50%',
-              background: '#7c3aed',
-              border: '2px solid #5b21b6',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              fontSize: '0.8rem',
-              fontWeight: 700,
-              color: '#fff',
-              flexShrink: 0,
-            }}>
-              {initial}
-            </div>
+              width: 32, height: 32, borderRadius: '50%',
+              background: 'linear-gradient(135deg, #7c3aed, #4c1d95)',
+              border: '2px solid #7c3aed44',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: '0.78rem', fontWeight: 700, color: '#fff',
+            }}>{initial}</div>
           )}
         </button>
       ) : (
         <button
           onClick={() => router.push('/')}
           style={{
-            background: '#7c3aed',
-            border: 'none',
-            borderRadius: '20px',
-            padding: '6px 14px',
-            color: '#fff',
-            fontSize: '0.8rem',
-            fontWeight: 600,
-            cursor: 'pointer',
-            flexShrink: 0,
+            background: 'linear-gradient(135deg, #7c3aed, #5b21b6)',
+            border: 'none', borderRadius: '10px', padding: '7px 16px',
+            color: '#fff', fontSize: '0.78rem', fontWeight: 700, cursor: 'pointer',
+            boxShadow: '0 4px 12px rgba(124,58,237,0.3)',
           }}
-        >
-          로그인
-        </button>
+        >로그인</button>
       )}
     </div>
   );

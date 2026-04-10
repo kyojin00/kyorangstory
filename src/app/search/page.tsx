@@ -128,7 +128,7 @@ export default function SearchPage() {
             <p style={{ fontSize: '2rem', margin: '0 0 12px' }}>🔎</p>
             <p style={{ fontSize: '0.9rem' }}>사람, 게시글, 감정태그를 검색해보세요</p>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '16px', flexWrap: 'wrap' }}>
-              {['우울', '연애', '직장', '가족', '외로움'].map(tag => (
+              {['행복', '연애', '직장', '가족', '외로움'].map(tag => (
                 <button key={tag} onClick={() => { setQuery(tag); handleSearch(tag); }} style={{ padding: '6px 14px', borderRadius: '20px', border: '1px solid #1e1b3a', background: 'transparent', color: '#64748b', fontSize: '0.82rem', cursor: 'pointer', transition: 'all 0.15s' }}
                   onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#7c3aed'; (e.currentTarget as HTMLElement).style.color = '#a78bfa'; }}
                   onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = '#1e1b3a'; (e.currentTarget as HTMLElement).style.color = '#64748b'; }}
