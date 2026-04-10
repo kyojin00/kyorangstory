@@ -56,9 +56,10 @@ export default function DMChatPage() {
 
   const bottomRef  = useRef<HTMLDivElement>(null);
   const inputRef   = useRef<HTMLTextAreaElement>(null);
-  const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
-  const myIdRef    = useRef<string | null>(null);   // send에서 클로저 없이 사용
-  const partnerRef = useRef<Profile | null>(null);
+  const channelRef   = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const myIdRef      = useRef<string | null>(null);
+  const partnerRef   = useRef<Profile | null>(null);
 
   useEffect(() => {
     if (!username) return;
