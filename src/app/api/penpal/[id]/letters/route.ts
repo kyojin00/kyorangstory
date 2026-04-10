@@ -7,13 +7,13 @@ import { createClient } from '@/lib/supabase/server';
    편지 전송 */
 export async function POST(
   req: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
 
-  const matchId = params.id;
+  const { id: matchId } = await params;
   const { content } = await req.json();
   if (!content?.trim())
     return NextResponse.json({ error: '내용을 입력해주세요' }, { status: 400 });
