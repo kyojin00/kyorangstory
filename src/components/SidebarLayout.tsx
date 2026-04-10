@@ -36,8 +36,29 @@ export default function SidebarLayout({ children, rightPanel }: Props) {
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
     const refreshCounts = async (uid: string) => {
+      // 현재 열려 있는 DM 채팅방 파트너 확인
+      const { data: activeRoom } = await supabase
+        .from('active_dm_rooms')
+        .select('room_partner_id, updated_at')
+        .eq('user_id', uid)
+        .maybeSingle();
+
+      const isRoomActive = activeRoom &&
+        Date.now() - new Date(activeRoom.updated_at).getTime() < 30_000;
+
+      // 채팅 중인 상대 메시지는 미읽음 카운트 제외
+      let dmQuery = supabase
+        .from('direct_messages')
+        .select('*', { count: 'exact', head: true })
+        .eq('receiver_id', uid)
+        .eq('is_read', false);
+
+      if (isRoomActive && activeRoom?.room_partner_id) {
+        dmQuery = dmQuery.neq('sender_id', activeRoom.room_partner_id);
+      }
+
       const [{ count: dmCount }, { count: notifCount }] = await Promise.all([
-        supabase.from('direct_messages').select('*', { count: 'exact', head: true }).eq('receiver_id', uid).eq('is_read', false),
+        dmQuery,
         supabase.from('notifications').select('*', { count: 'exact', head: true }).eq('user_id', uid).eq('is_read', false),
       ]);
       setUnreadDM(dmCount ?? 0);
