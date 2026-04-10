@@ -131,6 +131,25 @@ export async function POST(req: NextRequest) {
       matched_at:     new Date().toISOString(),
     });
     await supabase.from('penpal_requests').update({ status: 'matched' }).eq('id', partner.id);
+
+    // 양쪽 모두 알림 발송
+    await supabase.from('notifications').insert([
+      {
+        user_id:  user.id,
+        type:     'penpal_matched',
+        content:  '감정 펜팔 매칭이 됐어요. 첫 편지를 보내보세요.',
+        link:     '/penpal',
+        is_read:  false,
+      },
+      {
+        user_id:  partner.user_id,
+        type:     'penpal_matched',
+        content:  '감정 펜팔 매칭이 됐어요. 첫 편지를 보내보세요.',
+        link:     '/penpal',
+        is_read:  false,
+      },
+    ]);
+
     return NextResponse.json({ status: 'matched' });
   }
 

@@ -16,7 +16,7 @@ interface Actor {
 
 interface Notification {
   id:          string;
-  type:        'follow_request' | 'follow_accept' | 'follow' | 'like' | 'comment' | 'reply';
+  type:        'follow_request' | 'follow_accept' | 'follow' | 'like' | 'comment' | 'reply' | 'penpal_matched' | 'penpal_letter';
   actor_id:    string;
   actor:       Actor | null;
   target_id:   string | null;
@@ -36,10 +36,9 @@ function timeAgo(dateStr: string): string {
 }
 
 function Avatar({ url, name, size = 44 }: { url?: string; name?: string; size?: number }) {
-  const initial = (name ?? '?').charAt(0).toUpperCase();
   if (url) return (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={url} alt={name ?? ''} style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0 }} />
+    <img src={url} alt={name ?? ''} style={{ width: size, height: size, borderRadius: '50%', objectFit: 'cover', flexShrink: 0, border: '2px solid #1a1830' }} />
   );
   return (
     <div style={{
@@ -48,12 +47,25 @@ function Avatar({ url, name, size = 44 }: { url?: string; name?: string; size?: 
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       fontSize: size * 0.38, fontWeight: 700, color: '#fff',
     }}>
-      {initial}
+      {(name ?? '?').charAt(0).toUpperCase()}
     </div>
   );
 }
 
-// 알림 타입별 정보
+// 펜팔 알림용 아이콘 아바타
+function PenpalAvatar({ size = 44 }: { size?: number }) {
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: '50%', flexShrink: 0,
+      background: 'linear-gradient(135deg, #2d1b69, #7c3aed)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      fontSize: size * 0.44, border: '2px solid #1a1830',
+    }}>
+      💌
+    </div>
+  );
+}
+
 const TYPE_INFO: Record<string, { icon: string; text: (name: string) => string }> = {
   follow_request: { icon: '👤', text: name => `${name}님이 팔로우를 요청했어요` },
   follow_accept:  { icon: '✅', text: name => `${name}님이 팔로우 요청을 수락했어요` },
@@ -61,10 +73,15 @@ const TYPE_INFO: Record<string, { icon: string; text: (name: string) => string }
   like:           { icon: '❤️', text: name => `${name}님이 좋아요를 눌렀어요` },
   comment:        { icon: '💬', text: name => `${name}님이 댓글을 남겼어요` },
   reply:          { icon: '↩️', text: name => `${name}님이 답글을 남겼어요` },
+  penpal_matched: { icon: '💌', text: _    => '감정 펜팔 매칭이 됐어요. 첫 편지를 보내보세요.' },
+  penpal_letter:  { icon: '✉️', text: _    => '펜팔로부터 새 편지가 도착했어요.' },
 };
 
-// 알림 클릭 시 이동할 링크
+const PENPAL_TYPES = ['penpal_matched', 'penpal_letter'];
+
 function getTargetLink(notif: Notification): string | null {
+  if (PENPAL_TYPES.includes(notif.type)) return '/penpal';
+
   const { type, target_id, target_type } = notif;
   if (!target_id) return null;
 
@@ -98,16 +115,19 @@ export default function NotificationsPage() {
 
       if (!rows?.length) { setLoading(false); return; }
 
-      const actorIds = [...new Set(rows.map(n => n.actor_id))];
-      const { data: profiles } = await supabase
-        .from('profiles')
-        .select('id, username, display_name, avatar_url')
-        .in('id', actorIds);
+      // actor_id 없는 펜팔 알림 제외하고 프로필 조회
+      const actorIds = [...new Set(rows.map(n => n.actor_id).filter(Boolean))];
+      let profileMap: Record<string, any> = {};
+      if (actorIds.length) {
+        const { data: profiles } = await supabase
+          .from('profiles')
+          .select('id, username, display_name, avatar_url')
+          .in('id', actorIds);
+        profileMap = Object.fromEntries((profiles ?? []).map(p => [p.id, p]));
+      }
 
-      const profileMap = Object.fromEntries((profiles ?? []).map(p => [p.id, p]));
       setNotifs(rows.map(n => ({ ...n, actor: profileMap[n.actor_id] ?? null })));
 
-      // 전체 읽음 처리
       await supabase.from('notifications')
         .update({ is_read: true })
         .eq('user_id', user.id)
@@ -120,8 +140,8 @@ export default function NotificationsPage() {
   }, []);
 
   const handleDelete = async (id: string) => {
-    const { error } = await supabase.from('notifications').delete().eq('id', id);
-    if (!error) setNotifs(prev => prev.filter(n => n.id !== id));
+    await supabase.from('notifications').delete().eq('id', id);
+    setNotifs(prev => prev.filter(n => n.id !== id));
   };
 
   const handleDeleteAll = async () => {
@@ -165,12 +185,10 @@ export default function NotificationsPage() {
             )}
           </div>
           {notifs.length > 0 && (
-            <button onClick={handleDeleteAll} style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '0.82rem', transition: 'color 0.15s' }}
+            <button onClick={handleDeleteAll} style={{ background: 'transparent', border: 'none', color: '#64748b', cursor: 'pointer', fontSize: '0.82rem', transition: 'color 0.15s', fontFamily: 'inherit' }}
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#ef4444'; }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#64748b'; }}
-            >
-              모두 삭제
-            </button>
+            >모두 삭제</button>
           )}
         </div>
 
@@ -183,10 +201,11 @@ export default function NotificationsPage() {
             <p style={{ fontSize: '0.9rem' }}>아직 알림이 없어요</p>
           </div>
         ) : notifs.map(notif => {
-          const info     = TYPE_INFO[notif.type];
-          const name     = notif.actor?.display_name ?? '누군가';
-          const isUnread = !notif.is_read;
-          const link     = getTargetLink(notif);
+          const info       = TYPE_INFO[notif.type];
+          const name       = notif.actor?.display_name ?? '누군가';
+          const isUnread   = !notif.is_read;
+          const link       = getTargetLink(notif);
+          const isPenpal   = PENPAL_TYPES.includes(notif.type);
 
           return (
             <div
@@ -200,13 +219,16 @@ export default function NotificationsPage() {
               onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = '#0a0a16'; }}
               onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = isUnread ? '#0f0a1a' : 'transparent'; }}
             >
-              {/* 읽지 않음 dot */}
               {isUnread && (
                 <div style={{ position: 'absolute', left: '8px', top: '50%', transform: 'translateY(-50%)', width: '6px', height: '6px', borderRadius: '50%', background: '#7c3aed' }} />
               )}
 
-              {/* 아바타 */}
-              {notif.actor?.username ? (
+              {/* 아바타 — 펜팔은 편지 아이콘 */}
+              {isPenpal ? (
+                <Link href="/penpal">
+                  <PenpalAvatar size={44} />
+                </Link>
+              ) : notif.actor?.username ? (
                 <Link href={`/profile/${notif.actor.username}`}>
                   <Avatar url={notif.actor.avatar_url} name={notif.actor.display_name} size={44} />
                 </Link>
@@ -217,7 +239,6 @@ export default function NotificationsPage() {
               {/* 내용 */}
               <div style={{ flex: 1, minWidth: 0 }}>
                 <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '8px' }}>
-                  {/* 텍스트 + 링크 */}
                   {link ? (
                     <Link href={link} style={{ textDecoration: 'none', flex: 1 }}>
                       <p style={{ margin: '0 0 4px', fontSize: '0.875rem', color: '#e2e8f0', lineHeight: 1.5 }}>
@@ -235,48 +256,42 @@ export default function NotificationsPage() {
                       </span>
                     </p>
                   )}
-
-                  {/* 삭제 버튼 */}
                   <button
                     onClick={() => handleDelete(notif.id)}
-                    style={{ background: 'transparent', border: 'none', color: '#334155', cursor: 'pointer', fontSize: '0.85rem', padding: 0, flexShrink: 0, transition: 'color 0.15s' }}
+                    style={{ background: 'transparent', border: 'none', color: '#334155', cursor: 'pointer', fontSize: '0.85rem', padding: 0, flexShrink: 0, transition: 'color 0.15s', fontFamily: 'inherit' }}
                     onMouseEnter={e => { (e.currentTarget as HTMLElement).style.color = '#64748b'; }}
                     onMouseLeave={e => { (e.currentTarget as HTMLElement).style.color = '#334155'; }}
-                  >
-                    ✕
-                  </button>
+                  >✕</button>
                 </div>
 
                 <p style={{ margin: '0 0 10px', fontSize: '0.75rem', color: '#475569' }}>
                   {timeAgo(notif.created_at)}
                 </p>
 
+                {/* 펜팔 알림 — 바로가기 버튼 */}
+                {isPenpal && (
+                  <Link href="/penpal" style={{
+                    display: 'inline-block', padding: '6px 14px', borderRadius: '20px',
+                    border: '1px solid rgba(124,58,237,0.3)', color: '#a78bfa',
+                    fontSize: '0.82rem', textDecoration: 'none', transition: 'all 0.15s',
+                    background: 'rgba(124,58,237,0.08)',
+                  }}
+                    onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = '#7c3aed'; el.style.background = 'rgba(124,58,237,0.15)'; }}
+                    onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.borderColor = 'rgba(124,58,237,0.3)'; el.style.background = 'rgba(124,58,237,0.08)'; }}
+                  >
+                    💌 펜팔 보러가기 →
+                  </Link>
+                )}
+
                 {/* 팔로우 요청 수락/거절 */}
                 {notif.type === 'follow_request' && (
                   <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
-                      onClick={() => handleFollowAction(notif, 'accept')}
-                      disabled={handling === notif.id}
-                      style={{
-                        padding: '7px 18px', borderRadius: '20px', border: 'none',
-                        background: handling === notif.id ? '#1e1b3a' : '#7c3aed',
-                        color: '#fff', fontSize: '0.82rem', fontWeight: 700,
-                        cursor: handling === notif.id ? 'not-allowed' : 'pointer',
-                        transition: 'all 0.15s',
-                      }}
-                    >
+                    <button onClick={() => handleFollowAction(notif, 'accept')} disabled={handling === notif.id}
+                      style={{ padding: '7px 18px', borderRadius: '20px', border: 'none', background: handling === notif.id ? '#1e1b3a' : '#7c3aed', color: '#fff', fontSize: '0.82rem', fontWeight: 700, cursor: handling === notif.id ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
                       {handling === notif.id ? '처리 중...' : '✓ 수락'}
                     </button>
-                    <button
-                      onClick={() => handleFollowAction(notif, 'decline')}
-                      disabled={handling === notif.id}
-                      style={{
-                        padding: '7px 18px', borderRadius: '20px',
-                        border: '1px solid #334155', background: 'transparent',
-                        color: '#94a3b8', fontSize: '0.82rem', fontWeight: 600,
-                        cursor: handling === notif.id ? 'not-allowed' : 'pointer',
-                      }}
-                    >
+                    <button onClick={() => handleFollowAction(notif, 'decline')} disabled={handling === notif.id}
+                      style={{ padding: '7px 18px', borderRadius: '20px', border: '1px solid #334155', background: 'transparent', color: '#94a3b8', fontSize: '0.82rem', fontWeight: 600, cursor: handling === notif.id ? 'not-allowed' : 'pointer', fontFamily: 'inherit' }}>
                       ✕ 거절
                     </button>
                     {notif.actor?.username && (
@@ -287,14 +302,12 @@ export default function NotificationsPage() {
                   </div>
                 )}
 
-                {/* 팔로우 수락됨 */}
                 {notif.type === 'follow_accept' && notif.actor?.username && (
                   <Link href={`/profile/${notif.actor.username}`} style={{ display: 'inline-block', padding: '6px 14px', borderRadius: '20px', border: '1px solid #1e1b3a', color: '#94a3b8', fontSize: '0.82rem', textDecoration: 'none' }}>
                     프로필 보기
                   </Link>
                 )}
 
-                {/* 좋아요/댓글: 글 보기 링크 */}
                 {['like', 'comment', 'reply'].includes(notif.type) && link && (
                   <Link href={link} style={{ display: 'inline-block', padding: '6px 14px', borderRadius: '20px', border: '1px solid #1e1b3a', color: '#94a3b8', fontSize: '0.82rem', textDecoration: 'none', transition: 'border-color 0.15s' }}
                     onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = '#7c3aed'; (e.currentTarget as HTMLElement).style.color = '#a78bfa'; }}
