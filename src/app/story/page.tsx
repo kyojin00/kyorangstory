@@ -2,13 +2,15 @@
 
 // src/app/story/page.tsx
 
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import SidebarLayout from '@/components/SidebarLayout';
 import {
   Story, EmotionTag, ReactionType,
   EMOTION_LIST, EMOTION_COLOR, REACTION_ICON,
 } from '@/types/story.types';
+
+const PAGE_SIZE = 15;
 
 function timeAgo(dateStr: string): string {
   const diff = Date.now() - new Date(dateStr).getTime();
@@ -24,8 +26,6 @@ function timeAgo(dateStr: string): string {
 function StoryRightPanel() {
   return (
     <div style={{ padding: '20px 16px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-
-      {/* 배너 */}
       <div style={{
         borderRadius: '20px', padding: '22px',
         background: 'linear-gradient(140deg, #2d1b69 0%, #1a0f3d 100%)',
@@ -55,7 +55,6 @@ function StoryRightPanel() {
         </Link>
       </div>
 
-      {/* 감정 필터 */}
       <div style={{ borderRadius: '20px', padding: '18px', background: '#0d0d1f', border: '1px solid #1a1830' }}>
         <p style={{ margin: '0 0 12px', fontSize: '0.72rem', fontWeight: 700, color: '#2d2b50', letterSpacing: '0.06em', textTransform: 'uppercase' }}>
           감정으로 찾기
@@ -72,7 +71,6 @@ function StoryRightPanel() {
         </div>
       </div>
 
-      {/* 이용 안내 */}
       <div style={{ borderRadius: '20px', padding: '18px', background: '#0d0d1f', border: '1px solid #1a1830' }}>
         <p style={{ margin: '0 0 12px', fontSize: '0.72rem', fontWeight: 700, color: '#2d2b50', letterSpacing: '0.06em', textTransform: 'uppercase' }}>이용 안내</p>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
@@ -168,7 +166,6 @@ function StoryCard({ story, onReaction }: { story: Story; onReaction: (id: strin
         background: hov ? '#09091a' : 'transparent', transition: 'background 0.15s',
       }}
     >
-      {/* 작성자 */}
       <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
         <div style={{
           width: 36, height: 36, borderRadius: '50%', flexShrink: 0,
@@ -186,7 +183,6 @@ function StoryCard({ story, onReaction }: { story: Story; onReaction: (id: strin
         </div>
       </div>
 
-      {/* 감정 태그 */}
       {story.emotion_tags.length > 0 && (
         <div style={{ display: 'flex', gap: '5px', marginBottom: '10px', flexWrap: 'wrap' }}>
           {story.emotion_tags.map(tag => (
@@ -199,7 +195,6 @@ function StoryCard({ story, onReaction }: { story: Story; onReaction: (id: strin
         </div>
       )}
 
-      {/* 본문 */}
       <Link href={`/story/${story.id}`} style={{ textDecoration: 'none' }}>
         <p style={{
           margin: '0 0 16px', fontSize: '0.92rem', lineHeight: 1.8,
@@ -212,7 +207,6 @@ function StoryCard({ story, onReaction }: { story: Story; onReaction: (id: strin
         </p>
       </Link>
 
-      {/* 반응 + 댓글 */}
       <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
         {(['heart', 'hug', 'cry', 'cheer', 'same'] as ReactionType[]).map(type => (
           <ReactionButton
@@ -228,9 +222,7 @@ function StoryCard({ story, onReaction }: { story: Story; onReaction: (id: strin
 }
 
 /* ── 감정 탭 버튼 ── */
-function EmotionTab({
-  label, color, isActive, onClick,
-}: { label: string; color: string; isActive: boolean; onClick: () => void }) {
+function EmotionTab({ label, color, isActive, onClick }: { label: string; color: string; isActive: boolean; onClick: () => void }) {
   const [hov, setHov] = useState(false);
   return (
     <button
@@ -252,27 +244,76 @@ function EmotionTab({
 
 /* ── 메인 ── */
 export default function StoryFeedPage() {
-  const [stories,  setStories]  = useState<Story[]>([]);
-  const [selected, setSelected] = useState<EmotionTag | null>(null);
-  const [loading,  setLoading]  = useState(true);
+  const [stories,    setStories]    = useState<Story[]>([]);
+  const [selected,   setSelected]   = useState<EmotionTag | null>(null);
+  const [loading,    setLoading]    = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore,    setHasMore]    = useState(true);
+  const [offset,     setOffset]     = useState(0);
 
-  const fetchStories = useCallback(async (emotion: EmotionTag | null) => {
-    setLoading(true);
-    const url = emotion ? `/api/stories?emotion=${emotion}` : '/api/stories';
-    const res  = await fetch(url);
+  const loadMoreRef  = useRef<HTMLDivElement>(null);
+  const observerRef  = useRef<IntersectionObserver | null>(null);
+
+  const fetchStories = useCallback(async (
+    emotion: EmotionTag | null,
+    currentOffset: number,
+    replace = false
+  ) => {
+    if (replace) setLoading(true);
+    else setLoadingMore(true);
+
+    const params = new URLSearchParams();
+    if (emotion) params.set('emotion', emotion);
+    params.set('offset', String(currentOffset));
+    params.set('limit',  String(PAGE_SIZE));
+
+    const res  = await fetch(`/api/stories?${params}`);
     const data = await res.json();
-    setStories(Array.isArray(data) ? data : []);
+    const list = Array.isArray(data) ? data : [];
+
+    if (replace) setStories(list);
+    else setStories(prev => [...prev, ...list]);
+
+    setHasMore(list.length === PAGE_SIZE);
     setLoading(false);
+    setLoadingMore(false);
   }, []);
 
-  useEffect(() => { fetchStories(selected); }, [selected, fetchStories]);
+  // 탭/감정 변경 시 초기화
+  useEffect(() => {
+    setOffset(0);
+    setHasMore(true);
+    fetchStories(selected, 0, true);
+  }, [selected, fetchStories]);
+
+  // 무한 스크롤 observer
+  useEffect(() => {
+    if (!loadMoreRef.current) return;
+    observerRef.current?.disconnect();
+
+    observerRef.current = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting && hasMore && !loadingMore && !loading) {
+        const next = offset + PAGE_SIZE;
+        setOffset(next);
+        fetchStories(selected, next, false);
+      }
+    }, { threshold: 0.1 });
+
+    observerRef.current.observe(loadMoreRef.current);
+    return () => observerRef.current?.disconnect();
+  }, [hasMore, loadingMore, loading, offset, selected, fetchStories]);
 
   const handleReaction = async (storyId: string, type: ReactionType) => {
     await fetch(`/api/stories/${storyId}/reactions`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ reaction_type: type }),
     });
-    fetchStories(selected);
+    // 반응만 낙관적 업데이트
+    setStories(prev => prev.map(s =>
+      s.id === storyId
+        ? { ...s, user_reaction: s.user_reaction === type ? null : type }
+        : s
+    ));
   };
 
   return (
@@ -302,16 +343,8 @@ export default function StoryFeedPage() {
               boxShadow: '0 4px 16px rgba(124,58,237,0.3)',
               transition: 'transform 0.2s, box-shadow 0.2s',
             }}
-            onMouseEnter={e => {
-              const el = e.currentTarget as HTMLElement;
-              el.style.transform = 'translateY(-1px)';
-              el.style.boxShadow = '0 8px 24px rgba(124,58,237,0.45)';
-            }}
-            onMouseLeave={e => {
-              const el = e.currentTarget as HTMLElement;
-              el.style.transform = 'none';
-              el.style.boxShadow = '0 4px 16px rgba(124,58,237,0.3)';
-            }}
+            onMouseEnter={e => { const el = e.currentTarget as HTMLElement; el.style.transform = 'translateY(-1px)'; el.style.boxShadow = '0 8px 24px rgba(124,58,237,0.45)'; }}
+            onMouseLeave={e => { const el = e.currentTarget as HTMLElement; el.style.transform = 'none'; el.style.boxShadow = '0 4px 16px rgba(124,58,237,0.3)'; }}
           >
             ✏️ 털어놓기
           </Link>
@@ -323,11 +356,7 @@ export default function StoryFeedPage() {
           overflowX: 'auto', scrollbarWidth: 'none',
           borderBottom: '1px solid #0f0f22', background: '#06060f',
         }}>
-          <EmotionTab
-            label="전체" color="#7c3aed"
-            isActive={selected === null}
-            onClick={() => setSelected(null)}
-          />
+          <EmotionTab label="전체" color="#7c3aed" isActive={selected === null} onClick={() => setSelected(null)} />
           {EMOTION_LIST.map(e => (
             <EmotionTab
               key={e} label={e} color={EMOTION_COLOR[e]}
@@ -346,9 +375,27 @@ export default function StoryFeedPage() {
             <p style={{ fontSize: '0.95rem', color: '#2d2b50', fontWeight: 600 }}>아직 글이 없어요</p>
             <p style={{ fontSize: '0.82rem', color: '#1e1c40', marginTop: '6px' }}>첫 번째로 마음을 털어놔 보세요 💜</p>
           </div>
-        ) : stories.map(story => (
-          <StoryCard key={story.id} story={story} onReaction={handleReaction} />
-        ))}
+        ) : (
+          <>
+            {stories.map(story => (
+              <StoryCard key={story.id} story={story} onReaction={handleReaction} />
+            ))}
+
+            {/* 무한 스크롤 트리거 */}
+            <div ref={loadMoreRef} style={{ padding: '24px', textAlign: 'center' }}>
+              {loadingMore && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', color: '#2d2b50', fontSize: '0.8rem' }}>
+                  <div style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid #1a1830', borderTopColor: '#7c3aed', animation: 'spin 0.8s linear infinite' }} />
+                  <style dangerouslySetInnerHTML={{ __html: '@keyframes spin{to{transform:rotate(360deg)}}' }} />
+                  더 불러오는 중...
+                </div>
+              )}
+              {!hasMore && stories.length > 0 && (
+                <p style={{ color: '#1a1830', fontSize: '0.76rem' }}>— 모든 글을 봤어요 —</p>
+              )}
+            </div>
+          </>
+        )}
       </div>
     </SidebarLayout>
   );
