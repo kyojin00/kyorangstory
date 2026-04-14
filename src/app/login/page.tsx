@@ -6,6 +6,8 @@ import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 
+const supabase = createClient();
+
 export default function LoginPage() {
   const [tab,      setTab]      = useState<'login' | 'signup'>('login');
   const [email,    setEmail]    = useState('');
@@ -15,8 +17,7 @@ export default function LoginPage() {
   const [oauthLoading, setOauthLoading] = useState<'google' | 'kakao' | null>(null);
   const [error,    setError]    = useState('');
   const [success,  setSuccess]  = useState('');
-  const router   = useRouter();
-  const supabase = createClient();
+  const router = useRouter();
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
@@ -48,14 +49,23 @@ export default function LoginPage() {
   const handleOAuth = async (provider: 'google' | 'kakao') => {
     setOauthLoading(provider);
     setError('');
-    const { error: err } = await supabase.auth.signInWithOAuth({
-      provider,
-      options: {
-        redirectTo: `${location.origin}/auth/callback`,
-        scopes: provider === 'kakao' ? 'profile_nickname profile_image' : undefined,
-      },
-    });
-    if (err) { setError('로그인 중 오류가 발생했어요'); setOauthLoading(null); }
+    try {
+      const { data, error: err } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo: `${location.origin}/auth/callback`,
+          scopes: provider === 'kakao' ? 'profile_nickname profile_image' : undefined,
+        },
+      });
+      console.log('OAuth data:', data);
+      console.log('OAuth error:', err);
+      if (err) setError('로그인 중 오류가 발생했어요: ' + err.message);
+    } catch (e) {
+      console.error('OAuth exception:', e);
+      setError('예외 발생: ' + String(e));
+    } finally {
+      setOauthLoading(null);
+    }
   };
 
   return (
